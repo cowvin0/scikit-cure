@@ -22,9 +22,8 @@ dev = [
     "build>=1",
 ]
 
-[tool.setuptools]
-packages = ["skcure", "skcure.models", "skcure.utils"]
-include-package-data = false
+[tool.setuptools.packages.find]
+include = ["skcure*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
