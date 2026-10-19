@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skcure"
+version = "0.1.0.dev0"
+description = "Cure models with the scikit-survival estimator API"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-learn>=1.6",
+    "scikit-survival>=0.25",
+    "jax",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "build>=1",
+]
+
+[tool.setuptools]
+packages = ["skcure", "skcure.models", "skcure.utils"]
+include-package-data = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

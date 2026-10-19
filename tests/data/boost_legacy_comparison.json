@@ -1,0 +1,125 @@
+{
+  "description": "Measured old/new differences, not acceptance tolerances or expected new outputs. The original fixture and capture provenance are in boost_legacy.json and boost_legacy.md.",
+  "legacy_source_sha256": "f544a26146195fd208b6d9e67c1a8e8836ae52c127a8aed1210c3b28b1644158",
+  "refactored_boosting_source_sha256": "4a35f088319bf27bdd632b4063a71c29495664f8529482841fc135ddbb45cad6",
+  "dependency_versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.1",
+    "sklearn": "1.9.0",
+    "sksurv": "0.28.0"
+  },
+  "cases": {
+    "binomial": {
+      "original_latency": {
+        "a": 3.088875111645164,
+        "d": 2.0849381589855773,
+        "p": 46.25810692079197
+      },
+      "refactored_latency": {
+        "a": 3.1263715045586515,
+        "d": 2.0456662712646687,
+        "p": 33.640608448428736
+      },
+      "original_final_loglik": -26.732928678406527,
+      "refactored_final_loglik": -26.816933858897883,
+      "final_loglik_difference": -0.08400518049135641,
+      "full_fit_max_abs_difference": {
+        "eta": 9.344457368998249e-08,
+        "survival": 0.008267312438632629,
+        "cure": 2.471455048946858e-08,
+        "weights": 7.729903858666454e-08
+      },
+      "fixed_latency_max_abs_difference": {
+        "eta": 2.1183780923861306e-08,
+        "weights": 3.877825442699656e-08,
+        "tree_predictions": 2.93378075166828e-08,
+        "loglik_history": 1.21990467505384e-07
+      }
+    },
+    "poisson": {
+      "original_latency": {
+        "a": 2.979010266452695,
+        "d": 1.980656304210271,
+        "p": 81.55823900522151
+      },
+      "refactored_latency": {
+        "a": 2.9917734448988527,
+        "d": 1.9758122254390382,
+        "p": 57.61401123080193
+      },
+      "original_final_loglik": -28.87901558890184,
+      "refactored_final_loglik": -28.9832258535536,
+      "final_loglik_difference": -0.10421026465175842,
+      "full_fit_max_abs_difference": {
+        "eta": 0.00016534412010946187,
+        "survival": 0.0015532981094617537,
+        "cure": 6.0618121872024755e-05,
+        "weights": 4.020652583446027e-06
+      },
+      "fixed_latency_max_abs_difference": {
+        "eta": 2.273768789917696e-08,
+        "weights": 2.709458182120761e-08,
+        "tree_predictions": 1.3724849701191033e-08,
+        "loglik_history": 7.155363590527486e-08
+      }
+    },
+    "nb_fixed": {
+      "original_latency": {
+        "a": 2.907351820177969,
+        "d": 2.0485413176576532,
+        "p": 760.2979465547681,
+        "phi": 0.7
+      },
+      "refactored_latency": {
+        "a": 2.97145004703105,
+        "d": 2.0825834835059407,
+        "p": 75.92229704320665,
+        "phi": 0.7
+      },
+      "original_final_loglik": -29.57841085024352,
+      "refactored_final_loglik": -30.88344315956623,
+      "final_loglik_difference": -1.3050323093227085,
+      "full_fit_max_abs_difference": {
+        "eta": 9.11356791573753e-05,
+        "survival": 0.031948850344679425,
+        "cure": 2.504085691162894e-05,
+        "weights": 3.586968810947999e-06
+      },
+      "fixed_latency_max_abs_difference": {
+        "eta": 1.2700054918823867e-07,
+        "weights": 1.3092444411944015e-07,
+        "tree_predictions": 6.674576358278728e-08,
+        "loglik_history": 1.9711238508079987e-07
+      }
+    },
+    "nb_estimated": {
+      "original_latency": {
+        "a": 2.973480176833121,
+        "d": 1.9859220342812864,
+        "p": 86.56876945183781,
+        "phi": 1e-08
+      },
+      "refactored_latency": {
+        "a": 2.9815318219906657,
+        "d": 1.9830898678511457,
+        "p": 66.99198816170023,
+        "phi": 1e-08
+      },
+      "original_final_loglik": -28.812543619961218,
+      "refactored_final_loglik": -28.883988397312613,
+      "final_loglik_difference": -0.07144477735139532,
+      "full_fit_max_abs_difference": {
+        "eta": 9.80476670617847e-05,
+        "survival": 0.0007662371113174027,
+        "cure": 3.593651986644186e-05,
+        "weights": 9.912847132240166e-07
+      },
+      "fixed_latency_max_abs_difference": {
+        "eta": 3.8470866543793836e-07,
+        "weights": 8.354671829496896e-07,
+        "tree_predictions": 4.8611554559485626e-08,
+        "loglik_history": 7.27546193957096e-07
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+__pycache__
+R-4.4.3/
+R-4.4.3.tar.gz
+results/grid_results_pcm/results
+data/breast_cancer_results/grid_search_paired_50
+data/melanoma_results/grid_search_paired_50
+.venv/
