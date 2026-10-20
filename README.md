@@ -8,9 +8,9 @@ survival/cumulative-hazard step function interface.
 | Estimator | Model |
 | --- | --- |
 | `GGKM` | Generalized gamma kernel cure model with Poisson, negative binomial, or binomial latent counts. |
-| `GGBinomialGB` | Gradient-boosted binomial generalized gamma cure model, including Bernoulli counts with `K_bin=1`. |
-| `GGPoissonGB` | Gradient-boosted Poisson generalized gamma cure model. |
-| `GGNBGB` | Gradient-boosted negative binomial generalized gamma cure model. |
+<!-- | `GGBinomialGB` | Gradient-boosted binomial generalized gamma cure model, including Bernoulli counts with `K_bin=1`. |
+| `GGPoissonGB` | Gradient-boosted Poisson generalized gamma cure model. | -->
+<!-- | `GGNBGB` | Gradient-boosted negative binomial generalized gamma cure model. | -->
 | `MixtureCureModel` | Generalized gamma mixture cure model with logistic susceptibility. |
 | `PromotionTimeModel` | Generalized gamma promotion time cure model. |
 
