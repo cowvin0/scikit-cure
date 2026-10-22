@@ -21,7 +21,21 @@ from sksurv.util import Surv
 
 from skcure.base import BaseCureEstimator
 from skcure.ggkm import GGKM
-from skcure.utils.estimator import fit_cure_model
+
+
+def _fit_cure_model(model, X, t, delta, **fit_params):
+    """Adapt separate survival targets for the research compatibility tests."""
+    if isinstance(model, BaseCureEstimator):
+        delta = np.asarray(delta)
+        if delta.ndim != 1 or not np.all(np.isin(delta, [0, 1])):
+            raise ValueError("delta must be a one-dimensional array containing only 0 and 1.")
+
+        y = Surv.from_arrays(delta.astype(bool), t)
+        if fit_params:
+            model.set_params(**fit_params)
+        return model.fit(X, y)
+
+    return model.fit(X, t, delta, **fit_params)
 
 
 @pytest.fixture(scope="module")
@@ -496,7 +510,7 @@ def test_failed_refit_with_changed_parameters_invalidates_predictions(
 def test_research_adapter_fits_ggkm_and_moves_solver_settings(survival_data):
     X, y = survival_data
     model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=5)
-    fitted = fit_cure_model(
+    fitted = _fit_cure_model(
         model, X, y["time"], y["event"].astype(float), max_em_iter=1, tol=1e-5
     )
     assert fitted is model
@@ -516,7 +530,7 @@ def test_research_adapter_preserves_legacy_fit_arguments(survival_data):
     X, y = survival_data
     times, events = y["time"], y["event"].astype(float)
     model = LegacyModel()
-    assert fit_cure_model(model, X, times, events, max_em_iter=2, tol=1e-4) is model
+    assert _fit_cure_model(model, X, times, events, max_em_iter=2, tol=1e-4) is model
     received_X, received_times, received_events, received_params = model.received
     assert received_X is X
     assert received_times is times
@@ -538,7 +552,7 @@ def test_research_adapter_preserves_legacy_fit_arguments(survival_data):
 def test_research_adapter_rejects_invalid_events(survival_data, delta):
     X, y = survival_data
     with pytest.raises(ValueError, match="delta must"):
-        fit_cure_model(GGKM(max_em_iter=1), X, y["time"], delta)
+        _fit_cure_model(GGKM(max_em_iter=1), X, y["time"], delta)
 
 
 # Captured before the estimator API refactor with SciPy 1.18.1.

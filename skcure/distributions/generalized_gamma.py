@@ -131,19 +131,6 @@ def sf(t, a, d, p):
     )
 
 
-def _sf_from_cdf(t, a, d, p):
-    """Compute survival as ``1 - CDF``.
-
-    This is kept only for legacy numerical paths that historically used the
-    CDF complement instead of ``gammaincc`` directly.
-    """
-    return np.clip(
-        1.0 - cdf(t, a, d, p),
-        0.0,
-        1.0,
-    )
-
-
 def _validate_positive_finite_parameter(value, name):
     """Return a positive finite parameter as float."""
     value = float(value)
@@ -240,15 +227,6 @@ class GeneralizedGamma:
     def sf(self, t):
         """Survival function."""
         return sf(
-            t,
-            self.a,
-            self.d,
-            self.p,
-        )
-
-    def _sf_from_cdf(self, t):
-        """Legacy survival evaluation through ``1 - CDF``."""
-        return _sf_from_cdf(
             t,
             self.a,
             self.d,
