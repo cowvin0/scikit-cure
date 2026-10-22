@@ -17,6 +17,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+deep-learning = [
+    "tensorflow>=2.16",
+    "deepcure @ git+https://github.com/vhmedina/deepcure.git@4cb1dd2ba0a603c9b93c8584620b1488df12621b",
+    "numba",
+    "pandas",
+]
 dev = [
     "pytest>=8",
     "build>=1",

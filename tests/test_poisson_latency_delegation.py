@@ -3,7 +3,7 @@ from numpy.testing import assert_allclose
 from scipy.special import gammainc, gammaincc
 
 from skcure.distributions import GeneralizedGamma
-from skcure.models.latent import (
+from skcure._latent import (
     _BinomialLatentModel,
     _LatentCountModel,
     _NegativeBinomialLatentModel,

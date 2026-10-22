@@ -6,9 +6,9 @@ import numpy as np
 
 from skcure.base import _BaseParametricCureEstimator
 from skcure.distributions import GeneralizedGamma
-from skcure.models._em import fit_linear_cure_em
-from skcure.models._latency import _GeneralizedGammaLatencyOptimizer
-from skcure.models.latent import _LatentCountModel
+from skcure._em import fit_linear_cure_em
+from skcure._latency import _GeneralizedGammaLatencyOptimizer
+from skcure._latent import _LatentCountModel
 
 
 class _BaseLinearCureModel(_BaseParametricCureEstimator):
@@ -17,7 +17,7 @@ class _BaseLinearCureModel(_BaseParametricCureEstimator):
     Subclasses supply only the latent-count distribution and public naming.
     Likelihood evaluation, E-step calculations, incidence optimization,
     generalized-gamma latency optimization, and population predictions are
-    delegated to the same components used by GGKM and GDBT.
+    delegated to the same components used by GGKM and GradientBoostingCure.
     """
 
     _latency_optimizer = _GeneralizedGammaLatencyOptimizer()

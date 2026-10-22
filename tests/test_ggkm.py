@@ -1,6 +1,7 @@
 """Estimator contract and scientific regression tests for GGKM."""
 
 import inspect
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -19,7 +20,7 @@ from sksurv.metrics import concordance_index_censored
 from sksurv.util import Surv
 
 from skcure.base import BaseCureEstimator
-from skcure.models.ggkm import GGKM
+from skcure.ggkm import GGKM
 from skcure.utils.estimator import fit_cure_model
 
 
@@ -36,6 +37,28 @@ def survival_data():
 def fitted_model(survival_data):
     X, y = survival_data
     return GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=2).fit(X, y)
+
+
+def test_ggkm_is_defined_in_its_public_module():
+    from skcure import GGKM as root_export
+
+    assert GGKM.__module__ == "skcure.ggkm"
+    assert root_export is GGKM
+
+
+def test_fitted_estimator_pickle_roundtrip_uses_public_module(
+    fitted_model, survival_data
+):
+    restored = pickle.loads(pickle.dumps(fitted_model))
+
+    assert type(restored) is GGKM
+    assert restored.get_params() == fitted_model.get_params()
+    X, _ = survival_data
+    np.testing.assert_array_equal(restored.predict(X), fitted_model.predict(X))
+    np.testing.assert_array_equal(
+        restored.predict_cure_probability(X),
+        fitted_model.predict_cure_probability(X),
+    )
 
 
 def test_estimator_inherits_sklearn_and_sksurv_contracts():

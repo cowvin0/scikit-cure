@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from skcure.models._em import run_em
+from skcure._em import run_em
 
 
 def _state():

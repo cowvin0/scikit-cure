@@ -4,7 +4,7 @@ import inspect
 
 import pytest
 
-from skcure.models.latent import (
+from skcure._latent import (
     _BinomialLatentModel,
     _LatentCountModel,
     _NegativeBinomialLatentModel,

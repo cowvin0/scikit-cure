@@ -8,23 +8,151 @@ from scipy.special import expit
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.utils import check_random_state
 
-from skcure.utils.numerics import _maximum_log_float, _safe_exp
-from skcure.base import _BaseParametricCureEstimator
+from skcure.base import BaseCureEstimator
 from skcure.distributions import GeneralizedGamma
-from skcure.models._latency import _GeneralizedGammaLatencyOptimizer
-from skcure.models.latent import (
+from skcure._latency import _GeneralizedGammaLatencyOptimizer
+from skcure._latent import (
     _BinomialLatentModel,
     _LatentCountModel,
     _NegativeBinomialLatentModel,
     _PoissonLatentModel,
+    _normalize_latent_distribution,
 )
+from skcure.utils.numerics import _maximum_log_float, _safe_exp
 
 
-class _BaseGradientBoostingCure(_BaseParametricCureEstimator):
-    """One EM/boosting implementation, with distribution math shared with GGKM."""
+class GradientBoostingCure(BaseCureEstimator):
+    """Gradient-boosted generalized gamma cure model with latent counts.
+
+    Parameters
+    ----------
+    latent_distribution : {"poisson", "negative_binomial", "nb", "binomial"}, default="poisson"
+        Distribution of the latent number of event causes, as in ``GGKM``.
+    a, d, p : float, default=1.0
+        Positive initial generalized gamma parameters. Learned values are
+        available as ``a_``, ``d_``, and ``p_`` after fitting.
+    phi : float or None, default=None
+        Negative binomial dispersion. None estimates it starting at 0.5;
+        otherwise hold it fixed. Ignored by other latent distributions.
+    K_bin : int, default=1
+        Positive number of binomial trials. One gives Bernoulli latent counts.
+        Ignored by other latent distributions.
+    learning_rate : float, default=0.05
+        Shrinkage applied to each tree's line-search weight, in (0, 1].
+    n_estimators : int, default=100
+        Maximum number of trees added per EM iteration. The complete ensemble
+        can contain up to ``n_estimators * max_em_iter`` trees.
+    max_depth : int or None, default=3
+        Maximum depth of each regression tree.
+    min_samples_leaf : int or float, default=20
+        Minimum samples in a leaf, as in ``DecisionTreeRegressor``.
+    max_features : int, float, {"sqrt", "log2"} or None, default=None
+        Number of features considered when finding each tree split.
+    random_state : int, RandomState instance or None, default=None
+        Controls randomness in the regression trees.
+    tol : float, default=1e-6
+        Positive absolute log-likelihood tolerance for EM convergence.
+    max_em_iter : int or None, default=1000
+        Maximum EM iterations. None also uses a limit of 1000.
+    warm_start : bool, default=False
+        Reuse fitted generalized gamma parameters on refit, and estimated
+        dispersion when the latent configuration is unchanged. Every fit
+        initializes a new tree ensemble.
+
+    Attributes
+    ----------
+    a_, d_, p_ : float
+        Learned generalized gamma parameters.
+    phi_ : float
+        Fitted dispersion, available for negative binomial models only.
+    estimate_phi_ : bool
+        Whether dispersion is estimated; negative binomial models only.
+    models_ : list of DecisionTreeRegressor
+        Fitted trees, in the order they were added across EM iterations.
+    model_weights_ : list of float
+        Learning-rate-scaled line-search weight for each fitted tree.
+    n_estimators_ : int
+        Total number of fitted trees across all EM iterations.
+    eta_train_ : ndarray of shape (n_samples,)
+        Fitted additive predictor for the training data.
+    unique_times_ : ndarray
+        Sorted unique observed training times, including censoring times.
+    n_features_in_ : int
+        Number of features seen during fit.
+    feature_names_in_ : ndarray of shape (n_features_in_,)
+        Feature names, when all training feature names are strings.
+    converged_ : bool
+        Whether the EM convergence criterion was satisfied.
+    n_iter_ : int
+        Number of completed EM iterations.
+    loglik_history_ : list of float
+        Observed log-likelihood after each EM iteration.
+    final_loglik_ : float
+        Final observed log-likelihood.
+
+    Notes
+    -----
+    Trees model the incidence predictor; event times use a shared generalized
+    gamma latency distribution. EM alternates tree boosting, latency fitting,
+    and, for negative binomial counts with ``phi=None``, dispersion fitting.
+    """
 
     _default_max_em_iter = 1000
     _latency_optimizer = _GeneralizedGammaLatencyOptimizer()
+
+    def __init__(
+        self,
+        latent_distribution="poisson",
+        a=1.0,
+        d=1.0,
+        p=1.0,
+        phi=None,
+        K_bin=1,
+        learning_rate=0.05,
+        n_estimators=100,
+        max_depth=3,
+        min_samples_leaf=20,
+        max_features=None,
+        random_state=None,
+        tol=1e-6,
+        max_em_iter=1000,
+        warm_start=False,
+    ):
+        self.latent_distribution = latent_distribution
+        self.a = a
+        self.d = d
+        self.p = p
+        self.phi = phi
+        self.K_bin = K_bin
+        self.learning_rate = learning_rate
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.min_samples_leaf = min_samples_leaf
+        self.max_features = max_features
+        self.random_state = random_state
+        self.tol = tol
+        self.max_em_iter = max_em_iter
+        self.warm_start = warm_start
+
+    def __sklearn_is_fitted__(self):
+        return getattr(self, "_is_fitted", False)
+
+    @property
+    def phi_(self):
+        if self._latent_model.name != "negative_binomial":
+            raise AttributeError(
+                "phi_ is defined only for latent_distribution='negative_binomial'."
+            )
+        return self._latent_model.phi_
+
+    @property
+    def estimate_phi_(self):
+        if self._latent_model.name != "negative_binomial":
+            raise AttributeError(
+                "estimate_phi_ is defined only for "
+                "latent_distribution='negative_binomial'."
+            )
+        return self._latent_model.estimate_phi
 
     def _gg_value_and_grad(
         self,
@@ -83,14 +211,19 @@ class _BaseGradientBoostingCure(_BaseParametricCureEstimator):
             )
 
     def _make_latent_model(self) -> _LatentCountModel:
-        if self._distribution == "binomial":
+        distribution = _normalize_latent_distribution(self.latent_distribution)
+        if distribution == "binomial":
             if isinstance(self.K_bin, (bool, np.bool_)):
                 raise ValueError("K_bin must be a positive integer.")
             return _BinomialLatentModel(K_bin=self.K_bin)
-        if self._distribution == "negative_binomial":
-            latent = _NegativeBinomialLatentModel(phi=self.phi)
-            latent.phi = self.phi_
-            return latent
+        if distribution == "negative_binomial":
+            if self.phi is not None and (
+                not isinstance(self.phi, Real)
+                or not np.isfinite(self.phi)
+                or self.phi <= 0
+            ):
+                raise ValueError("phi must be positive and finite or None.")
+            return _NegativeBinomialLatentModel(phi=self.phi)
         return _PoissonLatentModel()
 
     def _validate_boosting_parameters(self):
@@ -242,7 +375,7 @@ class _BaseGradientBoostingCure(_BaseParametricCureEstimator):
         self._set_latency_parameters(*map(float, parameters))
 
     def _phi_m_step(self, t, delta):
-        if self._distribution != "negative_binomial" or self.phi is not None:
+        if self._latent_model.name != "negative_binomial":
             return
 
         self._latent_model.update_after_latency_from_eta(
@@ -251,15 +384,47 @@ class _BaseGradientBoostingCure(_BaseParametricCureEstimator):
             t,
             delta,
         )
-        self.phi_ = self._latent_model.phi
 
     def fit(self, X, y):
-        """Fit to numeric features and a structured boolean-event/time target."""
-        X, t, delta = self._prepare_fit(
-            X, y, default_max_em_iter=self._default_max_em_iter
+        """Fit the cure model to right-censored survival observations.
+
+        Parameters
+        ----------
+        X : array-like of shape (n_samples, n_features)
+            Numeric training features.
+        y : structured ndarray of shape (n_samples,)
+            A boolean event indicator followed by a strictly positive observed
+            event or censoring time. At least one event must be observed.
+
+        Returns
+        -------
+        self : GradientBoostingCure
+            The fitted estimator.
+        """
+        was_fitted = self.__sklearn_is_fitted__()
+        self._is_fitted = False
+        self._max_em_iter = self._validate_em_parameters(
+            default_max_em_iter=self._default_max_em_iter
         )
         self._validate_boosting_parameters()
-        self._latent_model = self._make_latent_model()
+        latent_model = self._make_latent_model()
+        X, event, t = self._validate_fit_data(X, y)
+        delta = event.astype(float)
+        configuration = (
+            latent_model.name,
+            self.phi if latent_model.name == "negative_binomial" else None,
+            self.K_bin if latent_model.name == "binomial" else None,
+        )
+        reuse = self.warm_start and was_fitted
+        if not reuse or configuration != self._latent_configuration:
+            self._latent_model = latent_model
+        self._latent_configuration = configuration
+        if not reuse:
+            self._set_latency_parameters(self.a, self.d, self.p)
+        self.loglik_history_ = []
+        self.converged_ = False
+        self.n_iter_ = 0
+        self.final_loglik_ = None
         self.X_train_ = X.copy()
         self.models_ = []
         self.model_weights_ = []
@@ -285,7 +450,13 @@ class _BaseGradientBoostingCure(_BaseParametricCureEstimator):
         self.final_loglik_ = float(ll_new)
         self.n_estimators_ = len(self.models_)
         self._latent_model.finalize_fit()
-        return self._finish_fit(t)
+        self.unique_times_ = np.unique(t)
+        self._is_fitted = True
+        return self
+
+    def predict(self, X):
+        """Return the additive predictor; larger scores indicate greater risk."""
+        return self.predict_eta(X)
 
     def predict_eta(self, X):
         """Return the fitted additive tree predictor (larger means more risk)."""
@@ -301,7 +472,7 @@ class _BaseGradientBoostingCure(_BaseParametricCureEstimator):
         """Return binomial cause probabilities or Poisson/NB latent means."""
         eta = self.predict_eta(X)
 
-        if self._distribution == "binomial":
+        if self._latent_model.name == "binomial":
             return expit(eta)
 
         if np.any(eta > _maximum_log_float()):
@@ -331,141 +502,3 @@ class _BaseGradientBoostingCure(_BaseParametricCureEstimator):
             eta,
         )
 
-
-class GGBinomialGB(_BaseGradientBoostingCure):
-    """Gradient-boosted binomial generalized-gamma cure model.
-
-    ``K_bin=1`` gives Bernoulli latent counts. ``n_estimators`` is the maximum
-    number of trees added *per EM iteration*. Trees, line-search bounds,
-    learning-rate shrinkage and the zero initial predictor follow the original
-    boosting algorithm. Gamma parameters use GGKM's shared stable objectives.
-
-    Fitting accepts ``fit(X, y)`` with a structured survival target. Solver
-    settings belong in the constructor; learned parameters are ``a_``, ``d_``,
-    and ``p_``. ``models_`` and ``model_weights_`` store the fitted ensemble.
-    ``warm_start`` reuses gamma parameters and initializes a new ensemble.
-    """
-
-    _distribution = "binomial"
-
-    def __init__(
-        self,
-        K_bin=1,
-        a=1.0,
-        d=1.0,
-        p=1.0,
-        learning_rate=0.05,
-        n_estimators=100,
-        max_depth=3,
-        min_samples_leaf=20,
-        max_features=None,
-        random_state=None,
-        tol=1e-6,
-        max_em_iter=1000,
-        warm_start=False,
-    ):
-        self.K_bin = K_bin
-        self.a = a
-        self.d = d
-        self.p = p
-        self.learning_rate = learning_rate
-        self.n_estimators = n_estimators
-        self.max_depth = max_depth
-        self.min_samples_leaf = min_samples_leaf
-        self.max_features = max_features
-        self.random_state = random_state
-        self.tol = tol
-        self.max_em_iter = max_em_iter
-        self.warm_start = warm_start
-
-    @staticmethod
-    def _theta_star(eta):
-        return expit(eta)
-
-    def _predict_theta_star_train(self):
-        return self._theta_star(self.eta_train_)
-
-
-class GGNBGB(_BaseGradientBoostingCure):
-    """Gradient-boosted negative-binomial generalized-gamma cure model.
-
-    ``phi=None`` estimates dispersion starting at 0.5; positive ``phi`` fixes
-    it. The learned dispersion is ``phi_``. Predictor calculations use the
-    true additive predictor without clipping at +/-50. Other controls and
-    fitted attributes follow ``GGBinomialGB``. ``warm_start`` reuses gamma
-    parameters and estimated dispersion while initializing a new ensemble.
-    """
-
-    _distribution = "negative_binomial"
-
-    def __init__(
-        self,
-        a=1.0,
-        d=1.0,
-        p=1.0,
-        phi=None,
-        learning_rate=0.05,
-        n_estimators=100,
-        max_depth=3,
-        min_samples_leaf=20,
-        max_features=None,
-        random_state=None,
-        tol=1e-6,
-        max_em_iter=1000,
-        warm_start=False,
-    ):
-        self.a = a
-        self.d = d
-        self.p = p
-        self.phi = phi
-        self.learning_rate = learning_rate
-        self.n_estimators = n_estimators
-        self.max_depth = max_depth
-        self.min_samples_leaf = min_samples_leaf
-        self.max_features = max_features
-        self.random_state = random_state
-        self.tol = tol
-        self.max_em_iter = max_em_iter
-        self.warm_start = warm_start
-
-
-class GGPoissonGB(_BaseGradientBoostingCure):
-    """Gradient-boosted Poisson generalized-gamma cure model.
-
-    Parameters and fitted ensemble attributes follow ``GGBinomialGB`` without
-    ``K_bin``. The original default EM limit is 10000. Survival and cure
-    probabilities are computed in the log domain, without forming an
-    overflowing latent intensity. ``warm_start`` initializes a new ensemble
-    while reusing the fitted gamma parameters.
-    """
-
-    _distribution = "poisson"
-    _default_max_em_iter = 10000
-
-    def __init__(
-        self,
-        a=1.0,
-        d=1.0,
-        p=1.0,
-        learning_rate=0.05,
-        n_estimators=100,
-        max_depth=3,
-        min_samples_leaf=20,
-        max_features=None,
-        random_state=None,
-        tol=1e-6,
-        max_em_iter=10000,
-        warm_start=False,
-    ):
-        self.a = a
-        self.d = d
-        self.p = p
-        self.learning_rate = learning_rate
-        self.n_estimators = n_estimators
-        self.max_depth = max_depth
-        self.min_samples_leaf = min_samples_leaf
-        self.max_features = max_features
-        self.random_state = random_state
-        self.tol = tol
-        self.max_em_iter = max_em_iter
-        self.warm_start = warm_start

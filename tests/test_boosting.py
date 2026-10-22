@@ -27,14 +27,19 @@ from sksurv.metrics import concordance_index_censored
 from sksurv.util import Surv
 
 import skcure
-import skcure.models
+import skcure.ensemble
 from skcure.base import BaseCureEstimator
-from skcure.models.gdbt_cure import GGBinomialGB, GGNBGB, GGPoissonGB
-import skcure.models.gdbt_cure as boosting_module
-import skcure.models.latent as latent_module
+from skcure.ensemble import GradientBoostingCure
+import skcure.ensemble._gb as boosting_module
+import skcure._latent as latent_module
 
-ESTIMATORS = [GGBinomialGB, GGNBGB, GGPoissonGB]
-BY_NAME = {cls.__name__: cls for cls in ESTIMATORS}
+LATENT_DISTRIBUTIONS = ["binomial", "negative_binomial", "poisson"]
+# Historical class names identify the independent reference data's provenance.
+FIXTURE_FAMILIES = {
+    "GGBinomialGB": "binomial",
+    "GGNBGB": "negative_binomial",
+    "GGPoissonGB": "poisson",
+}
 LEGACY = json.loads((Path(__file__).parent / "data" / "boost_legacy.json").read_text())
 CASES = list(LEGACY["cases"])
 
@@ -50,18 +55,22 @@ def fitted_models(survival_data):
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         return {
-            name: BY_NAME[case["class_name"]](
-                **case["params"], **LEGACY["fit_params"]
+            name: GradientBoostingCure(
+                latent_distribution=FIXTURE_FAMILIES[case["class_name"]],
+                **case["params"],
+                **LEGACY["fit_params"],
             ).fit(X, y)
             for name, case in LEGACY["cases"].items()
         }
 
 
-@pytest.mark.parametrize("estimator_class", ESTIMATORS)
-def test_survival_estimator_contract(estimator_class):
+@pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
+def test_survival_estimator_contract(distribution):
     a = np.float64(1.2)
     n = np.int64(2)
-    model = estimator_class(a=a, n_estimators=n, max_em_iter=1)
+    model = GradientBoostingCure(
+        latent_distribution=distribution, a=a, n_estimators=n, max_em_iter=1
+    )
     assert all(
         isinstance(model, parent)
         for parent in (
@@ -81,12 +90,10 @@ def test_survival_estimator_contract(estimator_class):
         check_is_fitted(copied)
 
 
-@pytest.mark.parametrize("estimator_class", ESTIMATORS)
-def test_public_exports(estimator_class):
-    name = estimator_class.__name__
-    for package in (skcure, skcure.models):
-        assert getattr(package, name) is estimator_class
-        assert name in package.__all__
+def test_public_exports():
+    for package in (skcure, skcure.ensemble):
+        assert package.GradientBoostingCure is GradientBoostingCure
+        assert "GradientBoostingCure" in package.__all__
 
 
 @pytest.mark.parametrize("case_name", CASES)
@@ -103,7 +110,7 @@ def test_fit_preserves_constructor_parameters(case_name, fitted_models, survival
     assert np.isfinite(model.final_loglik_)
     assert len(model.models_) == len(model.model_weights_)
     assert 1 <= len(model.models_) <= model.n_estimators * model.n_iter_
-    if isinstance(model, GGNBGB):
+    if model.latent_distribution == "negative_binomial":
         assert model.phi_ > 0
         if model.phi is not None:
             assert model.phi_ == model.phi
@@ -133,9 +140,13 @@ def test_frozen_latency_retains_original_boosting_updates(
     """Isolate the original E-step, gradient, trees, and line search from GG optimization."""
     X, y = survival_data
     case = LEGACY["cases"][case_name]
-    model = BY_NAME[case["class_name"]](**case["params"], **LEGACY["fit_params"])
+    model = GradientBoostingCure(
+        latent_distribution=FIXTURE_FAMILIES[case["class_name"]],
+        **case["params"],
+        **LEGACY["fit_params"],
+    )
     monkeypatch.setattr(model, "_gg_m_step", lambda *args, **kwargs: None)
-    if isinstance(model, GGNBGB):
+    if model.latent_distribution == "negative_binomial":
         monkeypatch.setattr(model, "_phi_m_step", lambda *args, **kwargs: None)
     model.fit(X, y)
     expected = case["fixed_gg_steps"]
@@ -194,10 +205,10 @@ def test_survival_and_cure_match_independent_count_formulas(
     eta = model.predict_eta(X[:4])[:, None]
     with np.errstate(over="ignore"):
         F = gammainc(model.d_ / model.p_, (times / model.a_) ** model.p_)
-    if isinstance(model, GGBinomialGB):
+    if model.latent_distribution == "binomial":
         expected = (1 - expit(eta) * F) ** model.K_bin
         cure = (1 - expit(eta[:, 0])) ** model.K_bin
-    elif isinstance(model, GGNBGB):
+    elif model.latent_distribution == "negative_binomial":
         expected = np.exp(-np.log1p(model.phi_ * np.exp(eta) * F) / model.phi_)
         cure = np.exp(-np.log1p(model.phi_ * np.exp(eta[:, 0])) / model.phi_)
     else:
@@ -218,14 +229,21 @@ def test_survival_and_cure_match_independent_count_formulas(
         np.testing.assert_array_equal(curve(model.unique_times_), row)
 
 
-@pytest.mark.parametrize("estimator_class", ESTIMATORS)
+@pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
 def test_e_step_and_observed_likelihood_match_formulas(
-    estimator_class, monkeypatch, survival_data
+    distribution, monkeypatch, survival_data
 ):
     X, y = survival_data
-    model = estimator_class(a=1.2, d=1.3, p=1.1, n_estimators=1, max_em_iter=1)
+    model = GradientBoostingCure(
+        latent_distribution=distribution,
+        a=1.2,
+        d=1.3,
+        p=1.1,
+        n_estimators=1,
+        max_em_iter=1,
+    )
     monkeypatch.setattr(model, "_gg_m_step", lambda *args, **kwargs: None)
-    if isinstance(model, GGNBGB):
+    if model.latent_distribution == "negative_binomial":
         monkeypatch.setattr(model, "_phi_m_step", lambda *args, **kwargs: None)
     model.fit(X, y)
     eta = np.linspace(-2, 2, len(X))
@@ -240,14 +258,14 @@ def test_e_step_and_observed_likelihood_match_formulas(
         - model.d_ * np.log(model.a_)
         - gammaln(model.d_ / model.p_)
     )
-    if isinstance(model, GGBinomialGB):
+    if model.latent_distribution == "binomial":
         theta = expit(eta)
         counts = delta + (model.K_bin - delta) * theta * S / (1 - theta + theta * S)
         ll = np.sum(
             delta * (np.log(model.K_bin) + np.log(theta) + log_f)
             + (model.K_bin - delta) * np.log1p(-theta * F)
         )
-    elif isinstance(model, GGNBGB):
+    elif model.latent_distribution == "negative_binomial":
         theta = np.exp(eta)
         counts = delta + (1 + model.phi_ * delta) * theta * S / (
             1 + model.phi_ * theta * F
@@ -273,9 +291,9 @@ def test_complete_data_functional_gradient(case_name, fitted_models):
     Nhat = np.array([0.2, 0.7, 1.3, 2.1])
 
     def objective(z):
-        if isinstance(model, GGBinomialGB):
+        if model.latent_distribution == "binomial":
             return np.sum(Nhat * z - model.K_bin * np.logaddexp(0, z))
-        if isinstance(model, GGNBGB):
+        if model.latent_distribution == "negative_binomial":
             return np.sum(
                 Nhat * z
                 - (Nhat + 1 / model.phi_) * np.logaddexp(0, np.log(model.phi_) + z)
@@ -367,7 +385,7 @@ def test_invalid_optimizer_parameters_return_penalty(
     assert np.shape(grad) == (3,)
 
 
-@pytest.mark.parametrize("estimator_class", ESTIMATORS)
+@pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
 @pytest.mark.parametrize(
     "method,args",
     [
@@ -380,12 +398,13 @@ def test_invalid_optimizer_parameters_return_penalty(
         ("predict_cumulative_hazard_function", ()),
     ],
 )
-def test_predictions_require_fitting(estimator_class, method, args):
+def test_predictions_require_fitting(distribution, method, args):
+    model = GradientBoostingCure(latent_distribution=distribution)
     with pytest.raises(NotFittedError):
-        getattr(estimator_class(), method)(np.ones((2, 2)), *args)
+        getattr(model, method)(np.ones((2, 2)), *args)
 
 
-@pytest.mark.parametrize("estimator_class", ESTIMATORS)
+@pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
 @pytest.mark.parametrize(
     "params",
     [
@@ -405,27 +424,34 @@ def test_predictions_require_fitting(estimator_class, method, args):
         {"min_samples_leaf": 0},
     ],
 )
-def test_hyperparameter_validation(estimator_class, params, survival_data):
+def test_hyperparameter_validation(distribution, params, survival_data):
     with pytest.raises((ValueError, TypeError)):
-        estimator_class(**params).fit(*survival_data)
+        GradientBoostingCure(latent_distribution=distribution, **params).fit(
+            *survival_data
+        )
 
 
 @pytest.mark.parametrize("phi", [0.0, -1.0, np.nan, np.inf])
 def test_dispersion_validation(phi, survival_data):
     with pytest.raises(ValueError, match="phi"):
-        GGNBGB(phi=phi, max_em_iter=1).fit(*survival_data)
+        GradientBoostingCure(
+            latent_distribution="negative_binomial", phi=phi, max_em_iter=1
+        ).fit(*survival_data)
 
 
 @pytest.mark.parametrize("K_bin", [0, -1, 1.5, True])
 def test_binomial_size_validation(K_bin, survival_data):
     with pytest.raises((ValueError, TypeError), match="K_bin"):
-        GGBinomialGB(K_bin=K_bin, max_em_iter=1).fit(*survival_data)
+        GradientBoostingCure(
+            latent_distribution="binomial", K_bin=K_bin, max_em_iter=1
+        ).fit(*survival_data)
 
 
-@pytest.mark.parametrize("estimator_class", ESTIMATORS)
-def test_refit_is_reproducible_and_resets_ensemble(estimator_class, survival_data):
+@pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
+def test_refit_is_reproducible_and_resets_ensemble(distribution, survival_data):
     X, y = survival_data
-    model = estimator_class(
+    model = GradientBoostingCure(
+        latent_distribution=distribution,
         n_estimators=2, max_em_iter=1, min_samples_leaf=3, random_state=73
     )
     model.fit(X, y)
@@ -439,11 +465,12 @@ def test_refit_is_reproducible_and_resets_ensemble(estimator_class, survival_dat
     assert all(tree is not old for tree, old in zip(model.models_, old_models))
 
 
-@pytest.mark.parametrize("estimator_class", ESTIMATORS)
-def test_pipeline_and_dataframe_features(estimator_class, survival_data):
+@pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
+def test_pipeline_and_dataframe_features(distribution, survival_data):
     X, y = survival_data
     frame = pd.DataFrame(X, columns=["first", "second"])
-    model = estimator_class(
+    model = GradientBoostingCure(
+        latent_distribution=distribution,
         n_estimators=1, max_em_iter=1, min_samples_leaf=3, random_state=73
     )
     pipeline = make_pipeline(StandardScaler(), model).fit(frame, y)
@@ -455,7 +482,7 @@ def test_pipeline_and_dataframe_features(estimator_class, survival_data):
         copied.predict(frame[["second", "first"]])
 
 
-@pytest.mark.parametrize("estimator_class", ESTIMATORS)
+@pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
 @pytest.mark.parametrize(
     "target",
     [
@@ -467,7 +494,7 @@ def test_pipeline_and_dataframe_features(estimator_class, survival_data):
         "wrong_length",
     ],
 )
-def test_structured_target_validation(estimator_class, target, survival_data):
+def test_structured_target_validation(distribution, target, survival_data):
     X, y = survival_data
     bad = y.copy()
     if target == "plain":
@@ -483,7 +510,9 @@ def test_structured_target_validation(estimator_class, target, survival_data):
         bad["time"][0] = {"zero_time": 0, "negative_time": -1, "nan_time": np.nan}[
             target
         ]
-    model = estimator_class(n_estimators=1, max_em_iter=1)
+    model = GradientBoostingCure(
+        latent_distribution=distribution, n_estimators=1, max_em_iter=1
+    )
     with pytest.raises((ValueError, TypeError)):
         model.fit(X, bad)
     with pytest.raises(NotFittedError):
@@ -527,12 +556,13 @@ def test_latency_optimizer_retries_in_log_parameters(
     np.testing.assert_allclose([model.a_, model.d_, model.p_], parameters, rtol=1e-14)
 
 
-@pytest.mark.parametrize("estimator_class", ESTIMATORS)
+@pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
 def test_failed_optimizer_invalidates_previous_fit(
-    estimator_class, monkeypatch, survival_data
+    distribution, monkeypatch, survival_data
 ):
     X, y = survival_data
-    model = estimator_class(
+    model = GradientBoostingCure(
+        latent_distribution=distribution,
         n_estimators=1, max_em_iter=1, min_samples_leaf=3, random_state=73
     ).fit(X, y)
 
@@ -546,13 +576,16 @@ def test_failed_optimizer_invalidates_previous_fit(
         model.predict(X)
 
 
-@pytest.mark.parametrize("estimator_class", ESTIMATORS)
+@pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
 @pytest.mark.parametrize("random_state", [-1, "invalid", 1.5])
-def test_random_state_validation(estimator_class, random_state, survival_data):
+def test_random_state_validation(distribution, random_state, survival_data):
     with pytest.raises(ValueError):
-        estimator_class(n_estimators=1, max_em_iter=1, random_state=random_state).fit(
-            *survival_data
-        )
+        GradientBoostingCure(
+            latent_distribution=distribution,
+            n_estimators=1,
+            max_em_iter=1,
+            random_state=random_state,
+        ).fit(*survival_data)
 
 
 @pytest.mark.parametrize("case_name", ["binomial", "nb_fixed"])
@@ -678,10 +711,11 @@ def test_dispersion_fallback_rejects_invalid_objective(
     assert model._latent_model.phi == pytest.approx(phi_before)
 
 
-@pytest.mark.parametrize("estimator_class", ESTIMATORS)
-def test_maximum_integer_seed_supports_multiple_trees(estimator_class, survival_data):
+@pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
+def test_maximum_integer_seed_supports_multiple_trees(distribution, survival_data):
     X, y = survival_data
-    model = estimator_class(
+    model = GradientBoostingCure(
+        latent_distribution=distribution,
         n_estimators=2,
         max_em_iter=1,
         min_samples_leaf=3,

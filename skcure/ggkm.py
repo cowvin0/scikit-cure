@@ -1,3 +1,5 @@
+"""Generalized gamma kernel cure estimator."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -11,13 +13,14 @@ from skcure.distributions import (
     GeneralizedGamma,
     validate_latency_distribution,
 )
-from skcure.models._em import fit_ggkm_em
-from skcure.models._latency import _GeneralizedGammaLatencyOptimizer
-from skcure.models.latent import (
+from skcure._em import fit_ggkm_em
+from skcure._latency import _GeneralizedGammaLatencyOptimizer
+from skcure._latent import (
     _BinomialLatentModel,
     _LatentCountModel,
     _NegativeBinomialLatentModel,
     _PoissonLatentModel,
+    _normalize_latent_distribution,
 )
 from skcure.utils.kernels import (
     _validate_kernel_hyperparameters,
@@ -26,6 +29,8 @@ from skcure.utils.kernels import (
     exponential_kernel,
     wavelet_kernel,
 )
+
+__all__ = ["GGKM"]
 
 
 class GGKM(BaseCureEstimator):
@@ -158,24 +163,7 @@ class GGKM(BaseCureEstimator):
         cls,
         value,
     ):
-        key = str(value).strip().lower().replace("-", "_").replace(" ", "_")
-
-        aliases = {
-            "poisson": cls._POISSON,
-            "negative_binomial": cls._NB,
-            "negativebinomial": cls._NB,
-            "nb": cls._NB,
-            "binomial": cls._BINOMIAL,
-        }
-
-        if key not in aliases:
-            raise ValueError(
-                "latent_distribution must be one of "
-                "{'poisson', 'negative_binomial', "
-                "'nb', 'binomial'}."
-            )
-
-        return aliases[key]
+        return _normalize_latent_distribution(value)
 
     @classmethod
     def _make_latent_model(

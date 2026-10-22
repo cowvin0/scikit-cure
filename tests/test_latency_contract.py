@@ -8,7 +8,7 @@ from skcure.distributions.base import (
     LatencyDistribution,
     validate_latency_distribution,
 )
-from skcure.models.latent import (
+from skcure._latent import (
     _BinomialLatentModel,
     _NegativeBinomialLatentModel,
     _PoissonLatentModel,

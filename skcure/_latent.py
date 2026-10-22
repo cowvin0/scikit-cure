@@ -10,6 +10,24 @@ from scipy.optimize import minimize
 from skcure.utils.numerics import _maximum_log_float, _exp_log_quantity, _exp_minus_exp
 
 
+def _normalize_latent_distribution(value):
+    """Resolve the latent-family names shared by kernel and ensemble models."""
+    key = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "poisson": "poisson",
+        "negative_binomial": "negative_binomial",
+        "negativebinomial": "negative_binomial",
+        "nb": "negative_binomial",
+        "binomial": "binomial",
+    }
+    if key not in aliases:
+        raise ValueError(
+            "latent_distribution must be one of "
+            "{'poisson', 'negative_binomial', 'nb', 'binomial'}."
+        )
+    return aliases[key]
+
+
 class _LatentCountModel(ABC):
     """Abstract fixed-predictor interface for latent count distributions.
 

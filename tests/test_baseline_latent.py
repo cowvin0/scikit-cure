@@ -6,12 +6,13 @@ import numpy as np
 import pytest
 from sksurv.util import Surv
 
-from skcure.models import GGKM, MixtureCureModel, PromotionTimeModel
-from skcure.models.latent import _BinomialLatentModel, _PoissonLatentModel
+from skcure import GGKM
+from skcure.linear_model import MixtureCure, PromotionTimeCure
+from skcure._latent import _BinomialLatentModel, _PoissonLatentModel
 
 FAMILIES = [
-    (PromotionTimeModel, _PoissonLatentModel, "poisson", "_predictor_value_and_grad"),
-    (MixtureCureModel, _BinomialLatentModel, "binomial", "_predictor_value_and_grad"),
+    (PromotionTimeCure, _PoissonLatentModel, "poisson", "_predictor_value_and_grad"),
+    (MixtureCure, _BinomialLatentModel, "binomial", "_predictor_value_and_grad"),
 ]
 
 

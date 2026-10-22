@@ -22,8 +22,8 @@ from scipy.optimize import minimize as scipy_minimize
 from sklearn.metrics.pairwise import pairwise_kernels
 from sksurv.util import Surv
 
-from skcure.models.ggkm import GGKM
-from skcure.models._latency import _GeneralizedGammaLatencyOptimizer
+from skcure.ggkm import GGKM
+from skcure._latency import _GeneralizedGammaLatencyOptimizer
 
 REFERENCE_PATH = Path(__file__).parent / "data" / "ggkm_em_reference.json"
 
@@ -151,7 +151,7 @@ def _record_optimizers(monkeypatch):
     with monkeypatch.context() as patch:
         for name, module in list(sys.modules.items()):
             if (
-                name.startswith("skcure.models.")
+                name.startswith("skcure.")
                 and getattr(module, "minimize", None) is scipy_minimize
             ):
                 patch.setattr(module, "minimize", traced_minimize)

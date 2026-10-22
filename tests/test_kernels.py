@@ -8,7 +8,7 @@ from sklearn.metrics.pairwise import pairwise_kernels
 from sklearn.model_selection import GridSearchCV, KFold
 from sksurv.util import Surv
 
-from skcure.models.ggkm import GGKM
+from skcure.ggkm import GGKM
 
 
 SKLEARN_KERNELS = [

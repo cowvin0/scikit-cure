@@ -1,20 +1,28 @@
 """Regression tests for linear cure models built from shared cure components."""
 
 import importlib
+import importlib.util
 import pickle
 
 import numpy as np
 import pytest
+from sklearn.base import clone
+from sklearn.exceptions import NotFittedError
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.utils.validation import check_is_fitted
 from sksurv.util import Surv
 
+import skcure
+import skcure.linear_model
+from skcure._latency import _GeneralizedGammaLatencyOptimizer
+from skcure._latent import _BinomialLatentModel, _PoissonLatentModel
 from skcure.distributions import GeneralizedGamma
-from skcure.models import MixtureCureModel, PromotionTimeModel
-from skcure.models._latency import _GeneralizedGammaLatencyOptimizer
-from skcure.models.latent import _BinomialLatentModel, _PoissonLatentModel
+from skcure.linear_model import MixtureCure, PromotionTimeCure
 
 MODEL_INFO = {
-    "mixture": (MixtureCureModel, _BinomialLatentModel),
-    "promotion": (PromotionTimeModel, _PoissonLatentModel),
+    "mixture": (MixtureCure, _BinomialLatentModel),
+    "promotion": (PromotionTimeCure, _PoissonLatentModel),
 }
 
 
@@ -110,7 +118,7 @@ def _assert_valid_fit(model, X, y, X_test):
 
     assert np.isfinite(model.score(X, y))
 
-    if isinstance(model, PromotionTimeModel):
+    if isinstance(model, PromotionTimeCure):
         theta = model.predict_theta(X_test)
         assert theta.shape == (len(X_test),)
         assert np.all(np.isfinite(theta))
@@ -322,7 +330,7 @@ def test_predictor_optimizer_rejects_invalid_results(family, failure, monkeypatc
     model = model_class(max_em_iter=1)
     X, y = _data()
 
-    em = importlib.import_module("skcure.models._em")
+    em = importlib.import_module("skcure._em")
     original = em.minimize
 
     def invalid_minimize(*args, **kwargs):
@@ -344,37 +352,55 @@ def test_predictor_optimizer_rejects_invalid_results(family, failure, monkeypatc
         model.fit(X, y)
 
 
-@pytest.mark.parametrize(
-    "family,module_name",
-    [("promotion", "promotion_time"), ("mixture", "mixture_cure")],
-)
-def test_baseline_import_compatibility(family, module_name):
+@pytest.mark.parametrize("family", MODEL_INFO)
+def test_linear_model_public_exports(family):
     model_class, _ = MODEL_INFO[family]
-    new_module = importlib.import_module("skcure.models." + module_name)
-    public = importlib.import_module("skcure.models")
-    legacy = importlib.import_module("skcure.models.baseline_model")
+    implementation = importlib.import_module("skcure.linear_model._cure")
 
-    assert getattr(new_module, model_class.__name__) is model_class
-    assert getattr(public, model_class.__name__) is model_class
-    assert getattr(legacy, model_class.__name__) is model_class
+    assert getattr(implementation, model_class.__name__) is model_class
+    assert model_class.__module__ == "skcure.linear_model._cure"
+    for package in (skcure, skcure.linear_model):
+        assert getattr(package, model_class.__name__) is model_class
+        assert model_class.__name__ in package.__all__
+    assert importlib.util.find_spec("skcure.models") is None
+
+
+def test_linear_estimators_do_not_export_obsolete_names_or_modules():
+    for name in ("MixtureCureModel", "PromotionTimeModel"):
+        for package in (skcure, skcure.linear_model):
+            assert not hasattr(package, name)
+            assert name not in package.__all__
+    assert importlib.util.find_spec("skcure.models") is None
 
 
 @pytest.mark.parametrize("family", MODEL_INFO)
-def test_baseline_legacy_pickle_compatibility(family):
-    """Old module-qualified pickles still resolve after moving a class."""
+def test_linear_model_pickle_uses_canonical_module(family):
     model_class, _ = MODEL_INFO[family]
-    original_module = model_class.__module__
+    model = model_class(max_em_iter=1)
+    payload = pickle.dumps(model)
 
-    try:
-        model_class.__module__ = "skcure.models.baseline_model"
-        model = model_class(max_em_iter=1)
-        payload = pickle.dumps(model)
-    finally:
-        model_class.__module__ = original_module
-
+    assert b"skcure.linear_model._cure" in payload
     restored = pickle.loads(payload)
     assert type(restored) is model_class
     assert restored.get_params() == model.get_params()
+
+
+@pytest.mark.parametrize("family", MODEL_INFO)
+def test_linear_estimator_clone_and_pipeline(family):
+    model_class, _ = MODEL_INFO[family]
+    model = model_class(a=1.2, d=0.9, p=1.1, max_em_iter=1)
+    X, y = _data()
+    pipeline = make_pipeline(StandardScaler(), model)
+    assert pipeline.fit(X, y) is pipeline
+    assert np.isfinite(pipeline.score(X, y))
+    np.testing.assert_array_equal(
+        pipeline.predict(X), model.predict(pipeline[0].transform(X))
+    )
+    copied = clone(model)
+    assert type(copied) is model_class
+    assert copied.get_params() == model.get_params()
+    with pytest.raises(NotFittedError):
+        check_is_fitted(copied)
 
 
 @pytest.mark.parametrize("family", MODEL_INFO)

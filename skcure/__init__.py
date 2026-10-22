@@ -1,22 +1,17 @@
 """Cure models with the scikit-survival estimator interface."""
 
 from .base import BaseCureEstimator
-from .models import (
-    GGKM,
-    GGBinomialGB,
-    GGNBGB,
-    GGPoissonGB,
-    MixtureCureModel,
-    PromotionTimeModel,
-)
+from .deep_learning import DeepPromotionTimeCure
+from .ensemble import GradientBoostingCure
+from .linear_model import MixtureCure, PromotionTimeCure
+from .ggkm import GGKM
 
 __version__ = "0.1.0.dev0"
 __all__ = [
     "BaseCureEstimator",
+    "DeepPromotionTimeCure",
     "GGKM",
-    "GGBinomialGB",
-    "GGNBGB",
-    "GGPoissonGB",
-    "MixtureCureModel",
-    "PromotionTimeModel",
+    "GradientBoostingCure",
+    "MixtureCure",
+    "PromotionTimeCure",
 ]
