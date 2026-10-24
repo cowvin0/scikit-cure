@@ -71,5 +71,32 @@ jobs:
         run: python -m pip install -r requirements-deep-learning.txt
       - run: python -m pytest -q
 
+  validation-workflows:
+    runs-on: ubuntu-latest
+    env:
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Scientific validation smoke study
+        run: python benchmarks/simulation.py --quick --output '${{ runner.temp }}/scientific-smoke.json'
+      - name: Runtime and memory smoke study
+        run: python benchmarks/performance.py --quick --output '${{ runner.temp }}/performance-smoke.json'
+      - name: Real-data workflow
+        run: python examples/gbsg2_analysis.py --quick --output '${{ runner.temp }}/gbsg2-smoke.json'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-reports
+          path: |
+            ${{ runner.temp }}/scientific-smoke.json
+            ${{ runner.temp }}/performance-smoke.json
+            ${{ runner.temp }}/gbsg2-smoke.json
+
   distributions:
     uses: ./.github/workflows/release-check.yml

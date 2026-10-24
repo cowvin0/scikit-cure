@@ -4,7 +4,8 @@ scikit-cure is a Python library for cure models that extends the
 [scikit-survival](https://scikit-survival.readthedocs.io/) estimator API.
 It combines survival and cure-probability prediction with
 [scikit-learn](https://scikit-learn.org/) pipelines, preprocessing, and
-cross-validation. The Python package is named `skcure`.
+cross-validation. The Python package is named `skcure`; the source tree is
+prepared for the first alpha, `0.1.0a1`.
 
 ## About cure models
 
@@ -86,6 +87,9 @@ See the [user guide](docs/README.md) for prediction meanings, fitting controls,
 assumptions, and observed-data evaluation. A runnable
 [evaluation example](examples/evaluation.py) and a
 [simulation benchmark](benchmarks/simulation.py) are included.
+See the [GBSG2 real-data walkthrough](docs/real_data.md) for preprocessing,
+training-only model selection, and held-out evaluation, and the
+[performance guide](docs/performance.md) for measured runtime/memory costs.
 
 The example uses a small iteration budget for demonstration. For an analysis,
 tune the solver settings and evaluate performance on held-out data.

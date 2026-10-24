@@ -7,8 +7,11 @@ nonzero probability of never experiencing the event of interest.
 - [Models, prediction methods, and assumptions](models.md)
 - [Fitting controls and diagnostics](fitting.md)
 - [Evaluation and simulation](evaluation.md)
+- [Real-data analysis: GBSG2](real_data.md)
+- [Performance and practical limits](performance.md)
+- [Alpha release scope and verification](release.md)
 - [Contributing and running checks](../CONTRIBUTING.md)
 - [Release notes](../CHANGELOG.md)
 
-The package is in development. The version is `0.1.0.dev0`; installation from a
-checkout is the documented installation method.
+The package is preparing its first alpha, `0.1.0a1`. Installation from a checkout
+is the documented method until a distribution has been published.

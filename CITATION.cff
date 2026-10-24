@@ -4,7 +4,7 @@ type: software
 title: scikit-cure
 authors:
   - name: scikit-cure contributors
-version: 0.1.0.dev0
+version: 0.1.0a1
 repository-code: https://github.com/cowvin0/scikit-cure
 url: https://github.com/cowvin0/scikit-cure
 license: GPL-3.0-or-later

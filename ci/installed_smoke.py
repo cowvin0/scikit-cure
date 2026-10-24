@@ -10,6 +10,7 @@ from sklearn.exceptions import ConvergenceWarning
 from sksurv.util import Surv
 
 import skcure
+from skcure.datasets import simulate_cure_survival
 from skcure.ensemble import GradientBoostingCure
 from skcure.ggkm import GGKM
 from skcure.linear_model import MixtureCure, PromotionTimeCure
@@ -22,6 +23,14 @@ project_metadata = metadata("skcure")
 assert project_metadata["License-Expression"] == "GPL-3.0-or-later"
 assert not any(" @ " in value for value in project_metadata.get_all("Requires-Dist", []))
 assert "deepcure" not in sys.modules
+
+for family in ("binomial", "poisson", "negative_binomial"):
+    sample = simulate_cure_survival(32, latent_distribution=family, K_bin=3, random_state=73)
+    np.testing.assert_array_equal(sample.cured, sample.latent_count == 0)
+    truth = sample.survival_probability([0, 1, 5])
+    assert truth.shape == (32, 3)
+    assert np.all(truth[:, 0] == 1)
+    assert np.all(np.diff(truth, axis=1) <= 0)
 
 rng = np.random.default_rng(73)
 X = rng.normal(size=(24, 2))

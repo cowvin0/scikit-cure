@@ -6,7 +6,7 @@ from .ensemble import GradientBoostingCure
 from .linear_model import MixtureCure, PromotionTimeCure
 from .ggkm import GGKM
 
-__version__ = "0.1.0.dev0"
+__version__ = "0.1.0a1"
 __all__ = [
     "BaseCureEstimator",
     "DeepPromotionTimeCure",

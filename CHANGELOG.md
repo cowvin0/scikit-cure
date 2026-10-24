@@ -1,6 +1,15 @@
 # Release notes
 
-## Unreleased — 0.1.0.dev0
+## 0.1.0a1 — unreleased alpha
+
+- Extend scientific validation to genuine Poisson, negative-binomial, and
+  binomial count-generating mechanisms, preserving existing simulation defaults.
+- Add survival-aware scikit-learn estimator checks and reproducible runtime
+  and process-memory benchmarks.
+- Add a complete GBSG2 real-data analysis with training-only model selection,
+  held-out evaluation, and explicit interpretation limits.
+- Prepare the first alpha metadata and document the public API and release
+  verification procedure. No package publication is performed by CI.
 
 - Recover finite generalized-gamma latency line-search failures with one
   validated restart, addressing a Windows warm-refit failure. Keep optional
