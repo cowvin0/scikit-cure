@@ -1,5 +1,3 @@
-"""Generalized gamma distribution family and numerical helpers."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -112,7 +110,9 @@ def _gamma_upper_tail_terms(s, u, log_u):
         if np.all(converged):
             break
     if not np.all(converged):
-        raise FloatingPointError("Generalized-gamma upper-tail fraction did not converge.")
+        raise FloatingPointError(
+            "Generalized-gamma upper-tail fraction did not converge."
+        )
     log_q = s * log_u - u - gammaln(s) + np.log(h)
     shape_ratio = -(log_u - digamma(s) + dh / h)
     return log_q, shape_ratio, 1.0 / h
@@ -133,11 +133,14 @@ def _gamma_lower_log_and_shape_derivative(s, u, log_u):
         if np.all(np.abs(term) <= np.abs(total) * (4.0 * np.finfo(float).eps)):
             break
     else:
-        raise FloatingPointError("Generalized-gamma lower-tail series did not converge.")
+        raise FloatingPointError(
+            "Generalized-gamma lower-tail series did not converge."
+        )
     # gammaln(1+s) must not round to zero before multiplication by tiny s.
     log_gamma = (
         -np.euler_gamma * s + (np.pi**2 / 12.0) * s * s
-        if s < 1.0e-8 else gammaln(s + 1.0)
+        if s < 1.0e-8
+        else gammaln(s + 1.0)
     )
     log_probability = s * log_u - u - log_gamma + np.log(total)
     derivative = log_u - digamma(s + 1.0) + derivative_total / total
@@ -178,9 +181,7 @@ def _gamma_log_probabilities(s, u, log_u):
         log_upper[upper_tail] = _gamma_upper_tail_terms(
             s, u[upper_tail], log_u[upper_tail]
         )[0]
-    tiny_shape_tail = (
-        np.isfinite(log_u) & (u < s + 1.0) & (upper < 1.0e-280)
-    )
+    tiny_shape_tail = np.isfinite(log_u) & (u < s + 1.0) & (upper < 1.0e-280)
     if np.any(tiny_shape_tail):
         # Here s itself is tiny: Q(s,u) = s*E1(u) + O(s**2).
         argument = u[tiny_shape_tail]
@@ -243,16 +244,19 @@ def cdf(t, a, d, p):
         p,
     )
 
-    result = np.asarray(gammainc(
-        d / p,
-        u,
-    ), dtype=float)
+    result = np.asarray(
+        gammainc(
+            d / p,
+            u,
+        ),
+        dtype=float,
+    )
     recover = np.isfinite(log_u) & (result < np.finfo(float).tiny)
     if np.any(recover):
         with np.errstate(under="ignore"):
-            result[recover] = np.exp(_gamma_log_probabilities(
-                d / p, u[recover], log_u[recover]
-            )[0])
+            result[recover] = np.exp(
+                _gamma_log_probabilities(d / p, u[recover], log_u[recover])[0]
+            )
     return result
 
 
@@ -264,18 +268,19 @@ def sf(t, a, d, p):
         p,
     )
 
-    result = np.asarray(gammaincc(
-        d / p,
-        u,
-    ), dtype=float)
-    recover = np.isfinite(log_u) & (
-        (result < np.finfo(float).tiny) | (u == 0.0)
+    result = np.asarray(
+        gammaincc(
+            d / p,
+            u,
+        ),
+        dtype=float,
     )
+    recover = np.isfinite(log_u) & ((result < np.finfo(float).tiny) | (u == 0.0))
     if np.any(recover):
         with np.errstate(under="ignore"):
-            result[recover] = np.exp(_gamma_log_probabilities(
-                d / p, u[recover], log_u[recover]
-            )[1])
+            result[recover] = np.exp(
+                _gamma_log_probabilities(d / p, u[recover], log_u[recover])[1]
+            )
     return result
 
 

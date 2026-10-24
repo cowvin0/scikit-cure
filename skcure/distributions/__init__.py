@@ -1,5 +1,3 @@
-"""Probability distributions used by scikit-cure models."""
-
 from .base import LatencyDistribution, validate_latency_distribution
 from .generalized_gamma import GeneralizedGamma
 

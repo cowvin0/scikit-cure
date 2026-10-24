@@ -1,5 +1,3 @@
-"""Gamma shape derivatives without import-time JAX or global configuration."""
-
 import os
 import subprocess
 import sys
@@ -93,7 +91,8 @@ assert pgamma_shape_derivative_vec([0.1, 1.0, 10.0], 1.0).shape == (3,)
 assert 'jax' not in sys.modules
 """
     subprocess.run(
-        [sys.executable, "-c", script], check=True,
+        [sys.executable, "-c", script],
+        check=True,
         env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
     )
 

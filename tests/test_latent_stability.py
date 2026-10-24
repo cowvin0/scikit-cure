@@ -1,5 +1,3 @@
-"""Numerical limits of the shared fixed-predictor count families."""
-
 from types import SimpleNamespace
 
 import numpy as np
@@ -69,9 +67,12 @@ def test_censored_invalid_latency_is_not_silently_replaced_by_zero(factory):
         def logcdf(self, t):
             return np.full_like(t, np.nan)
 
-    assert factory().observed_loglikelihood_from_eta(
-        InvalidLatency(), np.array([0.0]), np.array([1.0]), np.array([0.0])
-    ) == -np.inf
+    assert (
+        factory().observed_loglikelihood_from_eta(
+            InvalidLatency(), np.array([0.0]), np.array([1.0]), np.array([0.0])
+        )
+        == -np.inf
+    )
 
 
 @pytest.mark.parametrize("factory", [_PoissonLatentModel, _BinomialLatentModel])
@@ -91,9 +92,12 @@ def test_poisson_log_survival_remains_finite_after_survival_underflows():
     )
     assert_allclose(log_survival, [[-np.exp(8.0) * -np.expm1(-1.0)]])
     assert np.isfinite(log_survival[0, 0])
-    assert latent.predict_survival_from_eta(
-        _ExponentialLatency(), np.array([8.0]), np.array([1.0])
-    )[0, 0] == 0.0
+    assert (
+        latent.predict_survival_from_eta(
+            _ExponentialLatency(), np.array([8.0]), np.array([1.0])
+        )[0, 0]
+        == 0.0
+    )
 
 
 @pytest.mark.parametrize("phi", [1e-12, 1e-100, np.nextafter(0.0, 1.0)])
@@ -101,7 +105,9 @@ def test_negative_binomial_incidence_has_finite_poisson_limit(phi):
     eta = np.array([-3.0, 0.0, 1.0])
     expected_count = np.array([0.2, 1.5, 2.0])
     expected = _PoissonLatentModel().incidence_value_and_grad(eta, expected_count)
-    actual = _NegativeBinomialLatentModel(phi).incidence_value_and_grad(eta, expected_count)
+    actual = _NegativeBinomialLatentModel(phi).incidence_value_and_grad(
+        eta, expected_count
+    )
     assert_allclose(actual[0], expected[0], rtol=1e-10, atol=1e-12)
     assert_allclose(actual[1], expected[1], rtol=1e-10, atol=1e-12)
 
@@ -146,7 +152,11 @@ def test_negative_binomial_phi_derivative_uses_analytic_poisson_limit(phi):
 @pytest.mark.parametrize("phi", [1e-3, 0.5, 30.0])
 def test_negative_binomial_phi_derivative_matches_finite_differences(phi):
     latent = _NegativeBinomialLatentModel(phi)
-    arguments = (np.array([0.0, -0.7, 0.8]), np.log([0.1, 1.0, 20.0]), np.array([0.0, 1.0, 1.0]))
+    arguments = (
+        np.array([0.0, -0.7, 0.8]),
+        np.log([0.1, 1.0, 20.0]),
+        np.array([0.0, 1.0, 1.0]),
+    )
     step = phi * 1e-4
     value, grad = latent.phi_value_and_grad(np.array([phi]), *arguments)
     numerical = (
@@ -188,8 +198,14 @@ def test_negative_binomial_likelihood_and_e_step_match_direct_regular_formula(ph
     expected_count = delta + (1.0 + phi * delta) * theta * latency.sf(t) / (
         1.0 + phi * theta * latency.cdf(t)
     )
-    assert_allclose(latent.observed_loglikelihood_from_eta(latency, eta, t, delta), expected_ll, rtol=1e-14)
-    assert_allclose(latent.e_step_from_eta(latency, eta, t, delta), expected_count, rtol=1e-14)
+    assert_allclose(
+        latent.observed_loglikelihood_from_eta(latency, eta, t, delta),
+        expected_ll,
+        rtol=1e-14,
+    )
+    assert_allclose(
+        latent.e_step_from_eta(latency, eta, t, delta), expected_count, rtol=1e-14
+    )
 
 
 def test_negative_binomial_retains_finite_huge_predictor_log_survival():
@@ -217,9 +233,7 @@ def test_negative_binomial_rejects_invalid_log_dispersion_optimizer_result(
 
     monkeypatch.setattr("skcure._latent.minimize", controlled_minimize)
     with pytest.raises(RuntimeError, match="log-dispersion"):
-        latent._update_dispersion_in_log_space(
-            np.zeros(1), np.zeros(1), np.zeros(1)
-        )
+        latent._update_dispersion_in_log_space(np.zeros(1), np.zeros(1), np.zeros(1))
     assert latent.phi == original_phi
 
 
@@ -245,10 +259,16 @@ def test_negative_binomial_keeps_old_phi_when_candidate_reevaluation_is_invalid(
     assert latent.phi == original_phi
 
 
-@pytest.mark.parametrize("factory", [_PoissonLatentModel, _NegativeBinomialLatentModel, _BinomialLatentModel])
+@pytest.mark.parametrize(
+    "factory", [_PoissonLatentModel, _NegativeBinomialLatentModel, _BinomialLatentModel]
+)
 def test_log_survival_matches_survival_at_regular_values(factory):
     latent = factory()
-    arguments = (_ExponentialLatency(), np.array([-2.0, 0.1, 1.0]), np.array([0.0, 0.2, 2.0]))
+    arguments = (
+        _ExponentialLatency(),
+        np.array([-2.0, 0.1, 1.0]),
+        np.array([0.0, 0.2, 2.0]),
+    )
     log_survival = latent.predict_log_survival_from_eta(*arguments)
     assert_allclose(np.exp(log_survival), latent.predict_survival_from_eta(*arguments))
     assert_allclose(log_survival[:, 0], 0.0, atol=1e-16)

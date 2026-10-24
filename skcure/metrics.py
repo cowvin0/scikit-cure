@@ -1,10 +1,3 @@
-"""Observed-data survival evaluation and model-implied cure diagnostics.
-
-Right censoring does not reveal which event-free individuals are cured. The
-``model_implied_*`` diagnostics use predicted probabilities as their own class
-weights and therefore do not measure accuracy against observed outcomes.
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -250,14 +243,22 @@ def evaluate_survival(
         or np.any(grid < 0.0)
         or np.any(np.diff(grid) <= 0.0)
     ):
-        raise ValueError("times must contain at least two finite, non-negative, strictly increasing values.")
+        raise ValueError(
+            "times must contain at least two finite, non-negative, strictly increasing values."
+        )
     if grid[0] < test_time.min() or grid[-1] >= test_time.max():
         raise ValueError("times must lie in [min(test time), max(test time)).")
     if np.any(np.sum(event[:, None] & (test_time[:, None] <= grid), axis=0) == 0):
-        raise ValueError("Each evaluation time needs at least one observed test event at or before it.")
+        raise ValueError(
+            "Each evaluation time needs at least one observed test event at or before it."
+        )
     if tau is not None and (not np.isfinite(float(tau)) or tau <= 0):
         raise ValueError("tau must be positive and finite.")
-    if grid[-1] >= train_time.max() or np.max(test_time[event]) >= train_time.max() or test_time.max() > train_time.max():
+    if (
+        grid[-1] >= train_time.max()
+        or np.max(test_time[event]) >= train_time.max()
+        or test_time.max() > train_time.max()
+    ):
         raise ValueError(
             "Training follow-up must cover test follow-up and extend beyond evaluation times and all test event times; "
             "choose a supported held-out cohort rather than silently dropping observations."
@@ -265,25 +266,43 @@ def evaluate_survival(
     censoring = CensoringDistributionEstimator().fit(y_train)
     support_times = np.concatenate((grid, test_time[event]))
     try:
-        censoring_probability = np.asarray(censoring.predict_proba(support_times, return_conf_int=False), dtype=float)
+        censoring_probability = np.asarray(
+            censoring.predict_proba(support_times, return_conf_int=False), dtype=float
+        )
     except ValueError as exc:
-        raise ValueError("The training censoring distribution does not cover the evaluation data.") from exc
+        raise ValueError(
+            "The training censoring distribution does not cover the evaluation data."
+        ) from exc
     if np.any(censoring_probability <= 0.0):
-        raise ValueError("The training censoring probability must be positive at evaluation and test event times.")
+        raise ValueError(
+            "The training censoring probability must be positive at evaluation and test event times."
+        )
 
     prediction_model, prediction_X = _prediction_estimator(estimator, X_test)
     risk = np.asarray(estimator.predict(X_test), dtype=float)
-    survival = np.asarray(prediction_model.predict_survival(prediction_X, grid), dtype=float)
+    survival = np.asarray(
+        prediction_model.predict_survival(prediction_X, grid), dtype=float
+    )
     if risk.shape != (len(y_test),) or not np.all(np.isfinite(risk)):
-        raise ValueError("predict must return one finite risk score per test observation.")
+        raise ValueError(
+            "predict must return one finite risk score per test observation."
+        )
     if survival.shape != (len(y_test), len(grid)) or not np.all(np.isfinite(survival)):
-        raise ValueError("predict_survival must return a finite (n_test, n_times) array.")
-    if np.any((survival < 0.0) | (survival > 1.0)) or np.any(np.diff(survival, axis=1) > 1e-12):
-        raise ValueError("Survival probabilities must lie in [0, 1] and be non-increasing in time.")
+        raise ValueError(
+            "predict_survival must return a finite (n_test, n_times) array."
+        )
+    if np.any((survival < 0.0) | (survival > 1.0)) or np.any(
+        np.diff(survival, axis=1) > 1e-12
+    ):
+        raise ValueError(
+            "Survival probabilities must lie in [0, 1] and be non-increasing in time."
+        )
     concordance = concordance_index_ipcw(y_train, y_test, risk, tau=tau)[0]
     auc, mean_auc = cumulative_dynamic_auc(y_train, y_test, 1.0 - survival, grid)
     brier = integrated_brier_score(y_train, y_test, survival, grid)
-    return SurvivalEvaluation(float(concordance), auc, float(mean_auc), float(brier), grid.copy())
+    return SurvivalEvaluation(
+        float(concordance), auc, float(mean_auc), float(brier), grid.copy()
+    )
 
 
 __all__ = [

@@ -1,5 +1,3 @@
-"""Regression tests for probabilities and M-steps beyond ordinary tail ranges."""
-
 from types import SimpleNamespace
 
 import numpy as np
@@ -86,7 +84,9 @@ def test_latency_tail_gradient_matches_numerical_derivative(latent_model, pars):
         candidate, latent_model, time, delta, expected
     )
     value, gradient = objective(pars)
-    numerical = approx_derivative(lambda candidate: objective(candidate)[0], pars).ravel()
+    numerical = approx_derivative(
+        lambda candidate: objective(candidate)[0], pars
+    ).ravel()
     assert np.isfinite(value)
     np.testing.assert_allclose(gradient, numerical, rtol=2e-7, atol=2e-7)
 
@@ -105,7 +105,9 @@ def test_latency_gradient_retains_tiny_argument_with_substantial_cdf(latent_mode
         candidate, latent_model, time, np.zeros(2), np.ones(2)
     )
     value, gradient = objective(log_parameters)
-    numerical = approx_derivative(lambda candidate: objective(candidate)[0], log_parameters).ravel()
+    numerical = approx_derivative(
+        lambda candidate: objective(candidate)[0], log_parameters
+    ).ravel()
     assert np.isfinite(value)
     np.testing.assert_allclose(gradient, numerical, rtol=2e-5, atol=2e-9)
 
@@ -119,7 +121,9 @@ def test_invalid_latency_trial_is_not_a_finite_stationary_point(latent_model):
 
 
 @pytest.mark.parametrize("invalid", [np.nan, np.inf])
-def test_successful_latency_optimizer_cannot_accept_invalid_objective(latent_model, invalid):
+def test_successful_latency_optimizer_cannot_accept_invalid_objective(
+    latent_model, invalid
+):
     result = SimpleNamespace(
         success=True, fun=invalid, x=np.zeros(3), jac=np.zeros(3), message="controlled"
     )
@@ -128,7 +132,9 @@ def test_successful_latency_optimizer_cannot_accept_invalid_objective(latent_mod
 
 
 @pytest.mark.parametrize("finite_value", [1.0e100, 1.0e200, 1.0e300])
-def test_large_finite_latency_objectives_are_not_invalid_sentinels(latent_model, finite_value):
+def test_large_finite_latency_objectives_are_not_invalid_sentinels(
+    latent_model, finite_value
+):
     result = SimpleNamespace(
         success=True, fun=finite_value, x=np.zeros(3), jac=np.ones(3), message="valid"
     )
@@ -139,7 +145,11 @@ def test_large_finite_latency_objectives_are_not_invalid_sentinels(latent_model,
 
 def test_successful_latency_optimizer_cannot_accept_invalid_gradient(latent_model):
     result = SimpleNamespace(
-        success=True, fun=0.0, x=np.zeros(3), jac=np.full(3, np.nan), message="controlled"
+        success=True,
+        fun=0.0,
+        x=np.zeros(3),
+        jac=np.full(3, np.nan),
+        message="controlled",
     )
     with pytest.raises(RuntimeError, match="optimization failed"):
         _GeneralizedGammaLatencyOptimizer._validate_result(latent_model, result)
@@ -157,7 +167,11 @@ def test_latency_optimizer_reevaluates_candidate_before_mutating_distribution(
 
     def objective(parameters, *args):
         if np.any(parameters):
-            return (np.inf, np.zeros(3)) if invalid_part == "value" else (0.0, np.full(3, np.nan))
+            return (
+                (np.inf, np.zeros(3))
+                if invalid_part == "value"
+                else (0.0, np.full(3, np.nan))
+            )
         return 0.0, np.zeros(3)
 
     with pytest.raises(RuntimeError, match="final objective or gradient is invalid"):
@@ -175,7 +189,10 @@ def test_latency_optimizer_keeps_previous_parameters_if_finite_candidate_is_wors
         success=True, fun=1.0, x=np.ones(3), jac=np.zeros(3), message="controlled"
     )
     monkeypatch.setattr(latency_module, "minimize", lambda **kwargs: result)
-    objective = lambda parameters, *args: (float(parameters @ parameters), 2.0 * parameters)
+    objective = lambda parameters, *args: (
+        float(parameters @ parameters),
+        2.0 * parameters,
+    )
     _GeneralizedGammaLatencyOptimizer().maximize(
         latency, latent_model, objective, np.ones(2), np.zeros(2), np.ones(2)
     )

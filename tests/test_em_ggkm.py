@@ -1,11 +1,3 @@
-"""GGKM EM coverage for kernels, latent families, refits, and fit failures.
-
-The historical fixture still verifies unchanged configuration, inputs, and
-initialization. Fitted numerical results are checked against independent model
-equations and gradient differences: stable tail formulas can legitimately alter
-the trajectory of the ill-conditioned latency optimization.
-"""
-
 from contextlib import contextmanager, nullcontext
 import json
 from pathlib import Path
@@ -273,9 +265,7 @@ def _assert_fitted_equations(model, X, y, X_test):
         event_sum = np.sum(
             np.log(K) + np.log(probability[event_mask]) + log_density[event_mask]
         )
-        log_likelihood = event_sum + np.sum(
-            (K - delta) * np.log1p(-probability * F)
-        )
+        log_likelihood = event_sum + np.sum((K - delta) * np.log1p(-probability * F))
         conditional_count = delta + (K - delta) * probability * S / (
             1.0 - probability * F
         )
@@ -315,9 +305,9 @@ def _assert_fitted_equations(model, X, y, X_test):
         expected_log_survival = -np.exp(eta_test[:, None]) * test_F
         expected_cure = np.exp(-np.exp(eta_test))
     elif family == "negative_binomial":
-        expected_log_survival = -np.log1p(
-            model.phi_ * np.exp(eta_test[:, None]) * test_F
-        ) / model.phi_
+        expected_log_survival = (
+            -np.log1p(model.phi_ * np.exp(eta_test[:, None]) * test_F) / model.phi_
+        )
         expected_cure = np.exp(-np.log1p(model.phi_ * np.exp(eta_test)) / model.phi_)
     else:
         probability = expit(eta_test)
@@ -325,12 +315,16 @@ def _assert_fitted_equations(model, X, y, X_test):
         expected_log_survival = K * np.log1p(-probability[:, None] * test_F)
         expected_cure = (1.0 - probability) ** K
     np.testing.assert_allclose(
-        model.predict_log_survival(X_test, times), expected_log_survival,
-        rtol=1e-11, atol=1e-12,
+        model.predict_log_survival(X_test, times),
+        expected_log_survival,
+        rtol=1e-11,
+        atol=1e-12,
     )
     np.testing.assert_allclose(
-        model.predict_survival(X_test, times), np.exp(expected_log_survival),
-        rtol=1e-11, atol=1e-12,
+        model.predict_survival(X_test, times),
+        np.exp(expected_log_survival),
+        rtol=1e-11,
+        atol=1e-12,
     )
     np.testing.assert_allclose(
         model.predict_cure_probability(X_test), expected_cure, rtol=1e-11, atol=1e-12
@@ -398,7 +392,9 @@ def _run_failure(distribution, stage, model_class, monkeypatch):
         max_em_iter=2,
         warm_start=True,
     )
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 2 iterations"
+    ):
         model.fit(X, y)
     initial_state = _state(model)
 
@@ -431,7 +427,9 @@ def _run_failure(distribution, stage, model_class, monkeypatch):
         }[stage]
         monkeypatch.setattr(model, method, failed)
     warning_context = (
-        pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations")
+        pytest.warns(
+            ConvergenceWarning, match="EM did not converge within 2 iterations"
+        )
         if stage == "finalize"
         else nullcontext()
     )
@@ -569,7 +567,9 @@ def test_ggkm_em_reference(case, em_reference, monkeypatch):
         for key in ("latent_configuration", "n_features_in", "unique_times"):
             _assert_reference(state[key], historical_state[key])
         for key in ("K", "X_train"):
-            _assert_reference(state["fit_state"][key], historical_state["fit_state"][key])
+            _assert_reference(
+                state["fit_state"][key], historical_state["fit_state"][key]
+            )
         assert state["is_fitted"] is True
         predictions = run["predictions"]
         np.testing.assert_array_equal(predictions["risk"], predictions["eta"])

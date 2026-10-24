@@ -1,5 +1,3 @@
-"""Failed refits expose fresh diagnostics and reject worsening dispersion."""
-
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -27,7 +25,9 @@ def data():
     return X, y
 
 
-@pytest.fixture(scope="module", params=[GGKM, MixtureCure, PromotionTimeCure, GradientBoostingCure])
+@pytest.fixture(
+    scope="module", params=[GGKM, MixtureCure, PromotionTimeCure, GradientBoostingCure]
+)
 def fitted_model(request, data):
     parameters = dict(max_em_iter=1)
     if request.param is GradientBoostingCure:
@@ -36,7 +36,9 @@ def fitted_model(request, data):
         return request.param(**parameters).fit(*data)
 
 
-@pytest.mark.parametrize("failure", ["parameter", "solver_options", "nonfinite_features", "no_events"])
+@pytest.mark.parametrize(
+    "failure", ["parameter", "solver_options", "nonfinite_features", "no_events"]
+)
 def test_failed_refit_clears_previous_diagnostics(fitted_model, data, failure):
     model = deepcopy(fitted_model)
     X, y = data
@@ -92,7 +94,9 @@ def test_ggkm_kernel_failure_reports_failed_attempt(data):
 
 
 @pytest.mark.parametrize("log_coordinates", [False, True])
-def test_successful_dispersion_optimizer_cannot_worsen_objective(log_coordinates, monkeypatch):
+def test_successful_dispersion_optimizer_cannot_worsen_objective(
+    log_coordinates, monkeypatch
+):
     model = _NegativeBinomialLatentModel()
     const, log_A, delta = np.zeros(3), np.zeros(3), np.ones(3)
     before = model.phi_value_and_grad(np.array([model.phi]), const, log_A, delta)[0]
@@ -104,27 +108,37 @@ def test_successful_dispersion_optimizer_cannot_worsen_objective(log_coordinates
     )
     diagnostics = []
     result = SimpleNamespace(
-        success=True, fun=after,
+        success=True,
+        fun=after,
         x=np.array([np.log(candidate_phi) if log_coordinates else candidate_phi]),
         message="optimizer reports success",
     )
     with patch("skcure._latent.minimize", return_value=result):
         method = (
             model.update_after_latency_in_log_space_from_eta
-            if log_coordinates else model.update_after_latency_from_eta
+            if log_coordinates
+            else model.update_after_latency_from_eta
         )
         with pytest.raises(FloatingPointError, match="worsening objective"):
-            method(GeneralizedGamma(), np.zeros(3), np.ones(3), delta,
-                   result_callback=diagnostics.append)
+            method(
+                GeneralizedGamma(),
+                np.zeros(3),
+                np.ones(3),
+                delta,
+                result_callback=diagnostics.append,
+            )
     assert model.phi == 0.5
     assert model.phi_ is None
     assert diagnostics == [result]
 
 
-def test_dispersion_log_fallback_rejects_worsening_candidate_without_mutation(monkeypatch):
+def test_dispersion_log_fallback_rejects_worsening_candidate_without_mutation(
+    monkeypatch,
+):
     model = _NegativeBinomialLatentModel()
     monkeypatch.setattr(
-        model, "dispersion_objective_terms_from_eta",
+        model,
+        "dispersion_objective_terms_from_eta",
         lambda *args: (np.zeros(3), np.zeros(3)),
     )
     raw = SimpleNamespace(success=False, fun=np.inf, x=np.array([0.5]), message="retry")
@@ -147,7 +161,9 @@ def test_worsening_dispersion_fails_fit_with_accessible_diagnostics(estimator, d
     model = estimator(**parameters)
 
     def candidate(fun, **kwargs):
-        coordinate = np.log(100.0) if fun.__name__ == "log_phi_value_and_grad" else 100.0
+        coordinate = (
+            np.log(100.0) if fun.__name__ == "log_phi_value_and_grad" else 100.0
+        )
         return SimpleNamespace(
             success=True, fun=0.0, x=np.array([coordinate]), message="stale success"
         )
@@ -164,22 +180,30 @@ def test_worsening_dispersion_fails_fit_with_accessible_diagnostics(estimator, d
 
 
 @pytest.mark.parametrize("log_coordinates", [False, True])
-def test_dispersion_guard_allows_roundoff_at_same_candidate(log_coordinates, monkeypatch):
+def test_dispersion_guard_allows_roundoff_at_same_candidate(
+    log_coordinates, monkeypatch
+):
     model = _NegativeBinomialLatentModel()
     calls = iter([3.0 + 4 * np.finfo(float).eps, 3.0])
     monkeypatch.setattr(
         model, "phi_value_and_grad", lambda *args: (next(calls), np.zeros(1))
     )
     monkeypatch.setattr(
-        model, "dispersion_objective_terms_from_eta",
+        model,
+        "dispersion_objective_terms_from_eta",
         lambda *args: (np.zeros(3), np.zeros(3)),
     )
     result = SimpleNamespace(
-        success=True, fun=3.0,
-        x=np.array([np.log(0.5) if log_coordinates else 0.5]), message="stationary",
+        success=True,
+        fun=3.0,
+        x=np.array([np.log(0.5) if log_coordinates else 0.5]),
+        message="stationary",
     )
     with patch("skcure._latent.minimize", return_value=result):
-        method = (model.update_after_latency_in_log_space_from_eta
-                  if log_coordinates else model.update_after_latency_from_eta)
+        method = (
+            model.update_after_latency_in_log_space_from_eta
+            if log_coordinates
+            else model.update_after_latency_from_eta
+        )
         method(GeneralizedGamma(), np.zeros(3), np.ones(3), np.ones(3))
     assert model.phi == 0.5

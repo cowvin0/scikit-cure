@@ -1,5 +1,3 @@
-"""Training budgets, validation isolation, and ensemble-prefix predictions."""
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -16,7 +14,9 @@ def data():
     X = rng.normal(size=(64, 3))
     event_time = rng.exponential(np.exp(-0.5 * X[:, 0])) + 0.05
     censoring = rng.uniform(0.5, 3.0, len(X))
-    return X, Surv.from_arrays(event_time <= censoring, np.minimum(event_time, censoring))
+    return X, Surv.from_arrays(
+        event_time <= censoring, np.minimum(event_time, censoring)
+    )
 
 
 def short_model(**parameters):
@@ -109,7 +109,9 @@ def test_staged_predictions_end_at_retained_model(distribution, extra, data):
     assert len(eta) == len(risk) == len(survival) == model.n_estimators_
     np.testing.assert_array_equal(eta[-1], model.predict_eta(X))
     np.testing.assert_array_equal(risk[-1], model.predict(X))
-    np.testing.assert_array_equal(survival[-1], model.predict_survival(X, [0.0, 0.5, 2.0]))
+    np.testing.assert_array_equal(
+        survival[-1], model.predict_survival(X, [0.0, 0.5, 2.0])
+    )
     for stage in survival:
         assert stage.shape == (len(X), 3)
         assert np.all(stage[:, 0] == 1)
@@ -122,8 +124,11 @@ def test_staged_predictions_end_at_retained_model(distribution, extra, data):
 
 @pytest.mark.parametrize(
     "method,args",
-    [("staged_predict_eta", ()), ("staged_predict", ()),
-     ("staged_predict_survival", ([0.0, 1.0],))],
+    [
+        ("staged_predict_eta", ()),
+        ("staged_predict", ()),
+        ("staged_predict_survival", ([0.0, 1.0],)),
+    ],
 )
 def test_staged_predictions_require_fitted_model(method, args):
     with pytest.raises(NotFittedError):
@@ -144,12 +149,14 @@ def test_validation_early_stopping_restores_best_complete_nb_model(data, monkeyp
     scores = iter([0.0, 2.0, 1.0])
 
     def validation_score(*args):
-        snapshots.append((
-            len(model.models_),
-            (model.a_, model.d_, model.p_),
-            model._latent_model.phi,
-            model.eta_train_.copy(),
-        ))
+        snapshots.append(
+            (
+                len(model.models_),
+                (model.a_, model.d_, model.p_),
+                model._latent_model.phi,
+                model.eta_train_.copy(),
+            )
+        )
         return next(scores)
 
     monkeypatch.setattr(model, "_validation_loglikelihood", validation_score)
@@ -162,7 +169,8 @@ def test_validation_early_stopping_restores_best_complete_nb_model(data, monkeyp
     assert model.phi_ == dispersion
     np.testing.assert_array_equal(model.eta_train_, eta)
     assert model.final_loglik_ == model._loglikelihood(
-        y["time"][model.training_indices_], y["event"][model.training_indices_].astype(float)
+        y["time"][model.training_indices_],
+        y["event"][model.training_indices_].astype(float),
     )
     assert model.validation_loglik_history_ == [2.0, 1.0]
     assert model.initial_validation_loglik_ == 0.0
@@ -186,8 +194,10 @@ def test_validation_can_restore_initial_zero_tree_model(data, monkeypatch):
 def test_real_validation_score_matches_returned_best_model(data):
     X, y = data
     model = short_model(
-        n_iter_no_change=2, validation_fraction=0.25,
-        validation_tol=1e6, max_total_estimators=None,
+        n_iter_no_change=2,
+        validation_fraction=0.25,
+        validation_tol=1e6,
+        max_total_estimators=None,
     ).fit(X, y)
     assert model.n_iter_ == 2
     validation = model.validation_indices_
@@ -195,12 +205,16 @@ def test_real_validation_score_matches_returned_best_model(data):
         X[validation], y["time"][validation], y["event"][validation].astype(float)
     )
     assert score == model.best_validation_loglik_
-    assert score == max([model.initial_validation_loglik_, *model.validation_loglik_history_])
+    assert score == max(
+        [model.initial_validation_loglik_, *model.validation_loglik_history_]
+    )
 
 
 def test_validation_rows_never_enter_training_updates(data, monkeypatch):
     X, y = data
-    model = short_model(n_iter_no_change=1, validation_fraction=0.25, validation_tol=1e6)
+    model = short_model(
+        n_iter_no_change=1, validation_fraction=0.25, validation_tol=1e6
+    )
     original_boosting = model._boosting_m_step
     original_latency = model._gg_m_step
     boosting_rows, latency_times = [], []
@@ -220,7 +234,9 @@ def test_validation_rows_never_enter_training_updates(data, monkeypatch):
     assert len(training) == 48
     assert len(validation) == 16
     assert not np.intersect1d(training, validation).size
-    np.testing.assert_array_equal(np.sort(np.r_[training, validation]), np.arange(len(X)))
+    np.testing.assert_array_equal(
+        np.sort(np.r_[training, validation]), np.arange(len(X))
+    )
     assert y["event"][training].any() and y["event"][validation].any()
     for rows, times in zip(boosting_rows, latency_times):
         np.testing.assert_array_equal(rows, X[training])
@@ -263,7 +279,8 @@ def test_small_validation_split_keeps_event_in_each_subset(data):
     y["event"] = False
     y["event"][:2] = True
     model = short_model(
-        n_iter_no_change=1, validation_fraction=1 / len(y),
+        n_iter_no_change=1,
+        validation_fraction=1 / len(y),
         validation_tol=1e6,
     ).fit(X, y)
     assert y["event"][model.training_indices_].sum() == 1

@@ -1,5 +1,3 @@
-"""Generalized gamma kernel cure estimator."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -507,9 +505,7 @@ class GGKM(BaseCureEstimator):
             Nhat,
         )
 
-        if (
-            not np.isfinite(incidence_value) or np.any(~np.isfinite(incidence_grad))
-        ):
+        if not np.isfinite(incidence_value) or np.any(~np.isfinite(incidence_grad)):
             return (
                 np.inf,
                 np.zeros_like(pars),
@@ -529,9 +525,7 @@ class GGKM(BaseCureEstimator):
             K_alpha,
         )
 
-        if (
-            not np.isfinite(Q) or np.any(~np.isfinite(grad))
-        ):
+        if not np.isfinite(Q) or np.any(~np.isfinite(grad)):
             return (
                 np.inf,
                 np.zeros_like(pars),
@@ -663,7 +657,11 @@ class GGKM(BaseCureEstimator):
             raise ValueError(
                 "The kernel must produce a symmetric " "training kernel matrix."
             )
-        if callable(self.kernel) or self.kernel in {"precomputed", "sigmoid", "additive_chi2"}:
+        if callable(self.kernel) or self.kernel in {
+            "precomputed",
+            "sigmoid",
+            "additive_chi2",
+        }:
             _validate_positive_semidefinite(self.K_)
         fit_ggkm_em(self, t, delta)
         self.unique_times_ = np.unique(t)

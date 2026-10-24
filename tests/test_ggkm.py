@@ -1,5 +1,3 @@
-"""Estimator contract and scientific regression tests for GGKM."""
-
 import inspect
 import pickle
 
@@ -28,7 +26,9 @@ def _fit_cure_model(model, X, t, delta, **fit_params):
     if isinstance(model, BaseCureEstimator):
         delta = np.asarray(delta)
         if delta.ndim != 1 or not np.all(np.isin(delta, [0, 1])):
-            raise ValueError("delta must be a one-dimensional array containing only 0 and 1.")
+            raise ValueError(
+                "delta must be a one-dimensional array containing only 0 and 1."
+            )
 
         y = Surv.from_arrays(delta.astype(bool), t)
         if fit_params:
@@ -50,7 +50,9 @@ def survival_data():
 @pytest.fixture(scope="module")
 def fitted_model(survival_data):
     X, y = survival_data
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 2 iterations"
+    ):
         return GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=2).fit(X, y)
 
 
@@ -140,7 +142,9 @@ def test_fit_returns_self_and_keeps_constructor_parameters(survival_data):
         max_em_iter=2,
     )
     original_params = model.get_params().copy()
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 2 iterations"
+    ):
         assert model.fit(X, y) is model
     assert model.get_params() == original_params
     assert model.a_ > 0 and model.d_ > 0 and model.p_ > 0
@@ -233,7 +237,9 @@ def test_target_field_names_are_not_hardcoded(survival_data):
     custom_y = Surv.from_arrays(
         y["event"], y["time"], name_event="observed", name_time="duration"
     )
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, custom_y)
     expected = concordance_index_censored(
         custom_y["observed"], custom_y["duration"], model.predict(X)
@@ -244,7 +250,9 @@ def test_target_field_names_are_not_hardcoded(survival_data):
 def test_feature_names_are_recorded_and_validated(survival_data):
     X, y = survival_data
     frame = pd.DataFrame(X, columns=["age", "biomarker"])
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(frame, y)
     np.testing.assert_array_equal(model.feature_names_in_, frame.columns)
     assert model.predict(frame).shape == (len(frame),)
@@ -335,7 +343,9 @@ def test_pipeline_and_grid_search_use_survival_score(survival_data):
         cv=KFold(n_splits=2),
         error_score="raise",
     )
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         search.fit(X, y)
     assert np.all(np.isfinite(search.cv_results_["mean_test_score"]))
     assert search.predict(X[:3]).shape == (3,)
@@ -396,7 +406,9 @@ def test_population_survival_matches_latent_count_distribution(
     survival_data,
 ):
     X, y = survival_data
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 2 iterations"
+    ):
         model = GGKM(
             latent_distribution=distribution,
             gamma=0.3,
@@ -438,7 +450,9 @@ def test_refit_initializes_gamma_and_dispersion_as_requested(
     monkeypatch,
 ):
     X, y = survival_data
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model = GGKM(
             latent_distribution="negative_binomial",
             phi=phi,
@@ -478,7 +492,9 @@ def test_invalid_prediction_times_are_rejected(fitted_model, survival_data, time
 @pytest.mark.parametrize("wrong_feature_count", [False, True])
 def test_failed_refit_invalidates_predictions(survival_data, wrong_feature_count):
     X, y = survival_data
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, y)
     invalid_X = np.ones((len(y), 3)) if wrong_feature_count else X
     with pytest.raises(ValueError):
@@ -491,7 +507,9 @@ def test_failed_refit_invalidates_predictions(survival_data, wrong_feature_count
 
 def test_failed_optimization_invalidates_predictions(survival_data, monkeypatch):
     X, y = survival_data
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, y)
 
     def failed_e_step(*args):
@@ -509,7 +527,9 @@ def test_failed_refit_with_changed_parameters_invalidates_predictions(
     survival_data, params
 ):
     X, y = survival_data
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, y)
     model.set_params(**params)
     with pytest.raises(ValueError):
@@ -521,7 +541,9 @@ def test_failed_refit_with_changed_parameters_invalidates_predictions(
 def test_research_adapter_fits_ggkm_and_moves_solver_settings(survival_data):
     X, y = survival_data
     model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=5)
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         fitted = _fit_cure_model(
             model, X, y["time"], y["event"].astype(float), max_em_iter=1, tol=1e-5
         )
@@ -705,7 +727,9 @@ def test_fixed_kernel_fit_improves_legacy_likelihood_and_matches_count_formulas(
     # of rounding differences between SciPy's and sklearn's RBF distances.
     K = np.exp(-0.3 * cdist(X, X, metric="sqeuclidean"))
     K_new = np.exp(-0.3 * cdist(X[:3], X, metric="sqeuclidean"))
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 2 iterations"
+    ):
         model = GGKM(
             latent_distribution=expected["distribution"],
             gamma=0.3,
@@ -720,18 +744,22 @@ def test_fixed_kernel_fit_improves_legacy_likelihood_and_matches_count_formulas(
         F = gammainc(model.d_ / model.p_, (times / model.a_) ** model.p_)
     if expected["distribution"] == "binomial":
         probability = expit(eta)
-        survival = (1. - probability[:, None] * F) ** model.K_bin
-        cure = (1. - probability) ** model.K_bin
+        survival = (1.0 - probability[:, None] * F) ** model.K_bin
+        cure = (1.0 - probability) ** model.K_bin
     else:
         intensity = np.exp(eta)
         if expected["distribution"] == "poisson":
             survival = np.exp(-intensity[:, None] * F)
             cure = np.exp(-intensity)
         else:
-            survival = np.exp(-np.log1p(model.phi_ * intensity[:, None] * F) / model.phi_)
+            survival = np.exp(
+                -np.log1p(model.phi_ * intensity[:, None] * F) / model.phi_
+            )
             cure = np.exp(-np.log1p(model.phi_ * intensity) / model.phi_)
     np.testing.assert_allclose(model.predict(K_new), eta, rtol=1e-13)
-    np.testing.assert_allclose(model.predict_survival(K_new, times), survival, rtol=1e-12)
+    np.testing.assert_allclose(
+        model.predict_survival(K_new, times), survival, rtol=1e-12
+    )
     np.testing.assert_allclose(model.predict_cure_probability(K_new), cure, rtol=1e-12)
     # Stable tail derivatives change the historical L-BFGS path. Compare the
     # attained likelihood, rather than requiring the old suboptimal solution.

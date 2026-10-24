@@ -1,10 +1,3 @@
-"""Stable DeepPTM training endpoint, imported only with the optional backend.
-
-The upstream model architecture is retained. Its original loss subtracts two
-exponentials to evaluate ``theta * (1 - exp(-H0))``; this endpoint evaluates
-that quantity in the log domain instead.
-"""
-
 from typing import Any
 
 import numpy as np
@@ -59,7 +52,9 @@ class _StableDeepPTMEndpoint(tf.keras.layers.Layer):
         self.t_func = t_func
         self.parametrization = parametrization
         self.breakpoints = (
-            None if breakpoints is None else tf.convert_to_tensor(breakpoints, tf.float64)
+            None
+            if breakpoints is None
+            else tf.convert_to_tensor(breakpoints, tf.float64)
         )
         self.n_parameters = 2 if breakpoints is None else len(breakpoints) - 1
 

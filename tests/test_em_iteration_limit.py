@@ -1,5 +1,3 @@
-"""The public EM iteration parameter has one contract across cure estimators."""
-
 import inspect
 
 import numpy as np
@@ -11,7 +9,6 @@ from sksurv.util import Surv
 from skcure.ensemble import GradientBoostingCure
 from skcure.ggkm import GGKM
 from skcure.linear_model import MixtureCure, PromotionTimeCure
-
 
 ESTIMATORS = [GGKM, GradientBoostingCure, MixtureCure, PromotionTimeCure]
 
@@ -46,7 +43,9 @@ def test_numpy_integer_iteration_limit_is_preserved_and_obeyed(
     model = estimator(**parameters)
     original_parameters = model.get_params()
 
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 2 iterations"
+    ):
         assert model.fit(*survival_data) is model
     assert model.n_iter_ == max_em_iter
     assert model.max_em_iter is max_em_iter

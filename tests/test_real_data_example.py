@@ -1,5 +1,3 @@
-"""Real-cohort evaluation support, split isolation, and failure reporting."""
-
 from collections import Counter
 import json
 import warnings
@@ -27,7 +25,9 @@ def test_administrative_horizon_preserves_subjects_events_at_boundary_and_input(
     np.testing.assert_array_equal(source, original)
 
 
-def test_quick_real_cohort_analysis_fits_only_training_folds_and_evaluates_once(monkeypatch):
+def test_quick_real_cohort_analysis_fits_only_training_folds_and_evaluates_once(
+    monkeypatch,
+):
     preprocessing_rows = []
     fit_calls = []
     evaluations = []
@@ -41,10 +41,12 @@ def test_quick_real_cohort_analysis_fits_only_training_folds_and_evaluates_once(
 
     def record_fit(candidate, X, y, **kwargs):
         validation = kwargs.get("X_validation")
-        fit_calls.append((
-            frozenset(X.index),
-            None if validation is None else frozenset(validation.index),
-        ))
+        fit_calls.append(
+            (
+                frozenset(X.index),
+                None if validation is None else frozenset(validation.index),
+            )
+        )
         return original_fit(candidate, X, y, **kwargs)
 
     def record_evaluation(model, X, y, **kwargs):
@@ -59,7 +61,10 @@ def test_quick_real_cohort_analysis_fits_only_training_folds_and_evaluates_once(
     assert report["status"] == "ok"
     assert report["dataset"]["n_subjects"] == 686
     assert report["dataset"]["subjects_dropped"] == 0
-    assert report["dataset"]["events_within_horizon"] <= report["dataset"]["original_events"]
+    assert (
+        report["dataset"]["events_within_horizon"]
+        <= report["dataset"]["original_events"]
+    )
     train = frozenset(report["split"]["train_subject_indices"])
     test = frozenset(report["split"]["test_subject_indices"])
     assert len(train) == 514
@@ -88,8 +93,12 @@ def test_quick_real_cohort_analysis_fits_only_training_folds_and_evaluates_once(
         assert len(candidate["folds"]) == report["configuration"]["cv_folds"]
         assert candidate["parameters"]["max_em_iter"] == 300
     eligible = [item for item in report["candidates"] if item["eligible"]]
-    selected = next(item for item in eligible if item["model"] == report["selected_model"])
-    assert selected["mean_cv_concordance"] == max(item["mean_cv_concordance"] for item in eligible)
+    selected = next(
+        item for item in eligible if item["model"] == report["selected_model"]
+    )
+    assert selected["mean_cv_concordance"] == max(
+        item["mean_cv_concordance"] for item in eligible
+    )
     assert report["refit"]["usable"]
     metrics = report["evaluation"]
     assert 0 <= metrics["concordance_ipcw"] <= 1
@@ -115,21 +124,29 @@ class _FailingMixture(MixtureCure):
         raise RuntimeError("Controlled candidate failure")
 
 
-def test_failed_and_nonconverged_candidates_are_saved_without_test_evaluation(monkeypatch, tmp_path):
+def test_failed_and_nonconverged_candidates_are_saved_without_test_evaluation(
+    monkeypatch, tmp_path
+):
     def candidates(X_train, *, quick):
         return {
-            "failed": Pipeline([
-                ("preprocess", example.make_preprocessor(X_train)),
-                ("model", _FailingMixture(max_em_iter=1)),
-            ]),
-            "capped": Pipeline([
-                ("preprocess", example.make_preprocessor(X_train)),
-                ("model", MixtureCure(max_em_iter=1, tol=1e-30)),
-            ]),
+            "failed": Pipeline(
+                [
+                    ("preprocess", example.make_preprocessor(X_train)),
+                    ("model", _FailingMixture(max_em_iter=1)),
+                ]
+            ),
+            "capped": Pipeline(
+                [
+                    ("preprocess", example.make_preprocessor(X_train)),
+                    ("model", MixtureCure(max_em_iter=1, tol=1e-30)),
+                ]
+            ),
         }
 
     def unexpected_evaluation(*args, **kwargs):
-        raise AssertionError("No held-out evaluation is allowed without an eligible candidate.")
+        raise AssertionError(
+            "No held-out evaluation is allowed without an eligible candidate."
+        )
 
     monkeypatch.setattr(example, "make_candidates", candidates)
     monkeypatch.setattr(example, "evaluate_survival", unexpected_evaluation)
@@ -152,4 +169,7 @@ def test_failed_and_nonconverged_candidates_are_saved_without_test_evaluation(mo
         assert record["termination_reason"] == "max_em_iter"
         assert np.isfinite(record["score"])
         assert any("ConvergenceWarning" in item for item in record["warnings"])
-    assert all(not item["eligible"] and item["mean_cv_concordance"] is None for item in report["candidates"])
+    assert all(
+        not item["eligible"] and item["mean_cv_concordance"] is None
+        for item in report["candidates"]
+    )

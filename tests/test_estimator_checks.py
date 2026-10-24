@@ -1,15 +1,3 @@
-"""Upstream estimator checks with survival-aware targets.
-
-scikit-learn's generic fitting checks generate numeric class/regression labels,
-whereas scikit-survival requires structured event/time records. The test-only
-subclasses below convert those labels to positive, completely observed event
-times. They inherit the public estimator constructors and delegate fitting and
-scoring directly, so parameter mutation, validation, prediction and serialization
-are still checked on the real implementations. This is a selected compatibility
-suite, not a claim that generic classifier/regressor checks all apply to survival
-estimators.
-"""
-
 from contextlib import contextmanager
 from copy import deepcopy
 import warnings
@@ -37,7 +25,8 @@ def _expected_fit_warning(estimator):
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("error")
         warnings.filterwarnings(
-            "always", message=r"EM did not converge within \d+ iterations\.",
+            "always",
+            message=r"EM did not converge within \d+ iterations\.",
             category=ConvergenceWarning,
         )
         yield
@@ -103,9 +92,15 @@ CHECK_ESTIMATORS = [
     pytest.param(_CheckedGGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1), id="ggkm"),
     pytest.param(_CheckedMixtureCure(max_em_iter=1), id="mixture"),
     pytest.param(_CheckedPromotionTimeCure(max_em_iter=1), id="promotion-time"),
-    pytest.param(_CheckedGradientBoostingCure(
-        n_estimators=1, max_em_iter=1, min_samples_leaf=3, random_state=73,
-    ), id="boosting"),
+    pytest.param(
+        _CheckedGradientBoostingCure(
+            n_estimators=1,
+            max_em_iter=1,
+            min_samples_leaf=3,
+            random_state=73,
+        ),
+        id="boosting",
+    ),
 ]
 
 CONSTRUCTION_CHECKS = [
@@ -143,15 +138,26 @@ def test_upstream_fitting_checks_with_survival_targets(estimator, check):
     check(type(estimator).__name__, estimator)
 
 
-@pytest.mark.parametrize("estimator", [
-    pytest.param(GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1), id="ggkm"),
-    pytest.param(MixtureCure(max_em_iter=1), id="mixture"),
-    pytest.param(PromotionTimeCure(max_em_iter=1), id="promotion-time"),
-    pytest.param(GradientBoostingCure(
-        n_estimators=1, max_em_iter=1, min_samples_leaf=3, random_state=73,
-    ), id="boosting"),
-])
-def test_real_survival_pipeline_selection_preserves_data_and_feature_contract(estimator):
+@pytest.mark.parametrize(
+    "estimator",
+    [
+        pytest.param(GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1), id="ggkm"),
+        pytest.param(MixtureCure(max_em_iter=1), id="mixture"),
+        pytest.param(PromotionTimeCure(max_em_iter=1), id="promotion-time"),
+        pytest.param(
+            GradientBoostingCure(
+                n_estimators=1,
+                max_em_iter=1,
+                min_samples_leaf=3,
+                random_state=73,
+            ),
+            id="boosting",
+        ),
+    ],
+)
+def test_real_survival_pipeline_selection_preserves_data_and_feature_contract(
+    estimator,
+):
     rng = np.random.default_rng(73)
     X = pd.DataFrame(rng.normal(size=(24, 2)), columns=["first", "second"])
     y = Surv.from_arrays(
@@ -162,7 +168,8 @@ def test_real_survival_pipeline_selection_preserves_data_and_feature_contract(es
     parameters = deepcopy(estimator.get_params())
     pipeline = Pipeline([("scale", StandardScaler()), ("cure", estimator)])
     search = GridSearchCV(
-        pipeline, {"cure__tol": [1e-6, 1e-5]},
+        pipeline,
+        {"cure__tol": [1e-6, 1e-5]},
         cv=KFold(n_splits=2, shuffle=True, random_state=73),
     )
     search.set_params(error_score="raise")
@@ -171,7 +178,8 @@ def test_real_survival_pipeline_selection_preserves_data_and_feature_contract(es
     with warnings.catch_warnings(record=True) as captured:
         warnings.simplefilter("error")
         warnings.filterwarnings(
-            "always", message=r"EM did not converge within 1 iterations\.",
+            "always",
+            message=r"EM did not converge within 1 iterations\.",
             category=ConvergenceWarning,
         )
         search.fit(X, y)

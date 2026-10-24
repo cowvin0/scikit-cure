@@ -1,5 +1,3 @@
-"""Shared interface for scikit-survival compatible cure estimators."""
-
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from math import isfinite
@@ -239,9 +237,7 @@ class _BaseParametricCureEstimator(BaseCureEstimator):
             self.termination_reason_ = "failed"
             raise
 
-    def _prepare_fit_parameters(
-        self, X, y, *, was_fitted, nonnegative, booleans
-    ):
+    def _prepare_fit_parameters(self, X, y, *, was_fitted, nonnegative, booleans):
         """Initialize components after progress has been reset for this attempt."""
         self._validate_em_parameters(
             nonnegative=nonnegative,

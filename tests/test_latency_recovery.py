@@ -1,5 +1,3 @@
-"""Recovery from finite L-BFGS-B latency line-search failures."""
-
 from types import SimpleNamespace
 
 import numpy as np
@@ -165,7 +163,9 @@ def test_line_search_retry_keeps_non_worsening_safeguard(monkeypatch):
 
 
 @pytest.mark.parametrize("invalid_part", ["value", "gradient"])
-def test_successful_retry_still_requires_valid_fresh_objective(invalid_part, monkeypatch):
+def test_successful_retry_still_requires_valid_fresh_objective(
+    invalid_part, monkeypatch
+):
     calls = []
 
     def controlled_minimize(**kwargs):

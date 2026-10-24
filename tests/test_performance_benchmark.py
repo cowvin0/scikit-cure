@@ -1,5 +1,3 @@
-"""Process isolation, native memory reporting, and retained benchmark failures."""
-
 import importlib.util
 import json
 import os
@@ -8,7 +6,6 @@ import subprocess
 import sys
 
 import pytest
-
 
 PATH = Path(__file__).resolve().parents[1] / "benchmarks" / "performance.py"
 spec = importlib.util.spec_from_file_location("skcure_performance_benchmark", PATH)
@@ -19,8 +16,12 @@ spec.loader.exec_module(benchmark)
 
 def test_fresh_processes_report_native_memory_timings_and_bounded_fit_diagnostics():
     result = benchmark.run_benchmark(
-        sample_sizes=(24, 32), repetitions=1, model_names=("mixture",),
-        max_em_iter=2, prediction_samples=5, timeout=60,
+        sample_sizes=(24, 32),
+        repetitions=1,
+        model_names=("mixture",),
+        max_em_iter=2,
+        prediction_samples=5,
+        timeout=60,
     )
     assert len(result["attempts"]) == 2
     pids = []
@@ -44,14 +45,21 @@ def test_fresh_processes_report_native_memory_timings_and_bounded_fit_diagnostic
     assert result["environment"]["packages"]["numpy"]
     assert result["configuration"]["thread_limit"] == 1
     assert all(summary["fit_seconds"]["count"] == 1 for summary in result["summaries"])
-    assert all(summary["fit_seconds"]["standard_deviation"] is None for summary in result["summaries"])
+    assert all(
+        summary["fit_seconds"]["standard_deviation"] is None
+        for summary in result["summaries"]
+    )
     json.dumps(result, allow_nan=False)
 
 
 def test_ggkm_reports_actual_dense_kernel_storage():
     result = benchmark.run_benchmark(
-        sample_sizes=(24,), repetitions=1, model_names=("ggkm",),
-        max_em_iter=1, prediction_samples=5, timeout=60,
+        sample_sizes=(24,),
+        repetitions=1,
+        model_names=("ggkm",),
+        max_em_iter=1,
+        prediction_samples=5,
+        timeout=60,
     )
     record = result["attempts"][0]
     assert not record["failed"], record["error"]
@@ -63,20 +71,30 @@ def test_ggkm_reports_actual_dense_kernel_storage():
 def test_worker_failure_is_retained_in_attempts_and_summaries(failure, monkeypatch):
     def failed(*args, **kwargs):
         if failure == "timeout":
-            raise subprocess.TimeoutExpired(args[0], .01)
-        return subprocess.CompletedProcess(args[0], 42, stdout="", stderr="controlled failure")
+            raise subprocess.TimeoutExpired(args[0], 0.01)
+        return subprocess.CompletedProcess(
+            args[0], 42, stdout="", stderr="controlled failure"
+        )
 
     monkeypatch.setattr(benchmark.subprocess, "run", failed)
     result = benchmark.run_benchmark(
-        sample_sizes=(24,), repetitions=2, model_names=("mixture",), timeout=.01,
+        sample_sizes=(24,),
+        repetitions=2,
+        model_names=("mixture",),
+        timeout=0.01,
     )
     assert len(result["attempts"]) == 2
-    assert all(record["failed"] and record["phase"] == "worker" for record in result["attempts"])
+    assert all(
+        record["failed"] and record["phase"] == "worker"
+        for record in result["attempts"]
+    )
     assert all(record["peak_rss_bytes"] is None for record in result["attempts"])
     if failure == "timeout":
         assert all("TimeoutExpired" in record["error"] for record in result["attempts"])
     else:
-        assert all("controlled failure" in record["error"] for record in result["attempts"])
+        assert all(
+            "controlled failure" in record["error"] for record in result["attempts"]
+        )
     summary = result["summaries"][0]
     assert summary["failure_rate"] == 1
     assert summary["completed"] == 0
@@ -88,9 +106,21 @@ def test_worker_failure_is_retained_in_attempts_and_summaries(failure, monkeypat
 def test_quick_cli_writes_a_reproducible_configuration(tmp_path):
     output = tmp_path / "reports" / "performance.json"
     subprocess.run(
-        [sys.executable, str(PATH), "--quick", "--models", "mixture",
-         "--sample-sizes", "24", "--output", str(output)],
-        check=True, capture_output=True, text=True, timeout=60,
+        [
+            sys.executable,
+            str(PATH),
+            "--quick",
+            "--models",
+            "mixture",
+            "--sample-sizes",
+            "24",
+            "--output",
+            str(output),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     result = json.loads(output.read_text(encoding="utf-8"))
     assert result["configuration"]["sample_sizes"] == [24]
@@ -101,12 +131,21 @@ def test_quick_cli_writes_a_reproducible_configuration(tmp_path):
     assert not result["attempts"][0]["failed"]
 
 
-@pytest.mark.parametrize("settings", [
-    {"sample_sizes": ()}, {"sample_sizes": (1,)}, {"sample_sizes": (24, 24)},
-    {"model_names": ()}, {"model_names": ("unknown",)},
-    {"repetitions": 0}, {"max_em_iter": False}, {"thread_limit": 0},
-    {"timeout": float("nan")}, {"random_state": -1},
-])
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"sample_sizes": ()},
+        {"sample_sizes": (1,)},
+        {"sample_sizes": (24, 24)},
+        {"model_names": ()},
+        {"model_names": ("unknown",)},
+        {"repetitions": 0},
+        {"max_em_iter": False},
+        {"thread_limit": 0},
+        {"timeout": float("nan")},
+        {"random_state": -1},
+    ],
+)
 def test_invalid_configuration_fails_before_starting_workers(settings):
     with pytest.raises(ValueError):
         benchmark.run_benchmark(**settings)

@@ -1,10 +1,3 @@
-"""Internal EM orchestration and optimizer steps for cure estimators.
-
-The runner knows only the E-step, ordered M-steps, and observed likelihood.
-Distribution equations, initialization, input validation, and publication of
-fitted estimator attributes remain the caller's responsibility.
-"""
-
 from __future__ import annotations
 
 import warnings

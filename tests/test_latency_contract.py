@@ -1,5 +1,3 @@
-"""Contract tests for susceptible-event-time latency distributions."""
-
 import numpy as np
 import pytest
 
@@ -59,8 +57,12 @@ def test_log_probability_helpers_support_existing_distribution_contract():
     latency = _ExponentialLatency()
     time = np.array([0.0, 0.5, 2.0, np.nan])
     with np.errstate(divide="ignore"):
-        np.testing.assert_allclose(latency_logcdf(latency, time), np.log(latency.cdf(time)))
-        np.testing.assert_allclose(latency_logsf(latency, time), np.log(latency.sf(time)))
+        np.testing.assert_allclose(
+            latency_logcdf(latency, time), np.log(latency.cdf(time))
+        )
+        np.testing.assert_allclose(
+            latency_logsf(latency, time), np.log(latency.sf(time))
+        )
 
 
 def test_log_probability_helpers_prefer_direct_log_evaluations():

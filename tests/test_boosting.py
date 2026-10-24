@@ -1,10 +1,3 @@
-"""Boosting estimator contracts, legacy tree updates, and numerical formulas.
-
-The saved legacy results come from an independent, unmodified source snapshot.
-Free optimization is compared separately from the frozen-latency tree updates:
-using the stable generalized-gamma tail can change an optimizer's trajectory.
-"""
-
 import inspect
 import json
 from pathlib import Path
@@ -151,7 +144,9 @@ def test_frozen_latency_retains_original_boosting_updates(
     monkeypatch.setattr(model, "_gg_m_step", lambda *args, **kwargs: None)
     if model.latent_distribution == "negative_binomial":
         monkeypatch.setattr(model, "_phi_m_step", lambda *args, **kwargs: None)
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 3 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 3 iterations"
+    ):
         model.fit(X, y)
     expected = case["fixed_gg_steps"]
     # The safeguarded analytic line search replaces the historical numerical
@@ -249,7 +244,9 @@ def test_e_step_and_observed_likelihood_match_formulas(
     monkeypatch.setattr(model, "_gg_m_step", lambda *args, **kwargs: None)
     if model.latent_distribution == "negative_binomial":
         monkeypatch.setattr(model, "_phi_m_step", lambda *args, **kwargs: None)
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model.fit(X, y)
     eta = np.linspace(-2, 2, len(X))
     model.eta_train_ = eta
@@ -457,14 +454,21 @@ def test_refit_is_reproducible_and_resets_ensemble(distribution, survival_data):
     X, y = survival_data
     model = GradientBoostingCure(
         latent_distribution=distribution,
-        n_estimators=2, max_em_iter=1, min_samples_leaf=3, random_state=73
+        n_estimators=2,
+        max_em_iter=1,
+        min_samples_leaf=3,
+        random_state=73,
     )
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model.fit(X, y)
     old_predictions = model.predict(X).copy()
     old_a, old_d, old_p = model.a_, model.d_, model.p_
     old_models = list(model.models_)
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model.fit(X, y)
     np.testing.assert_array_equal(model.predict(X), old_predictions)
     assert (model.a_, model.d_, model.p_) == (old_a, old_d, old_p)
@@ -478,13 +482,20 @@ def test_pipeline_and_dataframe_features(distribution, survival_data):
     frame = pd.DataFrame(X, columns=["first", "second"])
     model = GradientBoostingCure(
         latent_distribution=distribution,
-        n_estimators=1, max_em_iter=1, min_samples_leaf=3, random_state=73
+        n_estimators=1,
+        max_em_iter=1,
+        min_samples_leaf=3,
+        random_state=73,
     )
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         pipeline = make_pipeline(StandardScaler(), model).fit(frame, y)
     assert np.isfinite(pipeline.predict(frame)).all()
     assert np.isfinite(pipeline.score(frame, y))
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         copied = clone(model).fit(frame, y)
     np.testing.assert_array_equal(copied.feature_names_in_, frame.columns)
     with pytest.raises(ValueError, match="feature"):
@@ -572,10 +583,15 @@ def test_failed_optimizer_invalidates_previous_fit(
     distribution, monkeypatch, survival_data
 ):
     X, y = survival_data
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model = GradientBoostingCure(
             latent_distribution=distribution,
-            n_estimators=1, max_em_iter=1, min_samples_leaf=3, random_state=73
+            n_estimators=1,
+            max_em_iter=1,
+            min_samples_leaf=3,
+            random_state=73,
         ).fit(X, y)
 
     def fail(*args, **kwargs):
@@ -726,7 +742,9 @@ def test_dispersion_fallback_rejects_invalid_objective(
 @pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
 def test_maximum_integer_seed_supports_multiple_trees(distribution, survival_data):
     X, y = survival_data
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model = GradientBoostingCure(
             latent_distribution=distribution,
             n_estimators=2,

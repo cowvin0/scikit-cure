@@ -1,5 +1,3 @@
-"""Gradient-boosted generalized-gamma cure models."""
-
 from copy import deepcopy
 from math import isfinite
 from numbers import Integral, Real
@@ -461,13 +459,12 @@ class GradientBoostingCure(BaseCureEstimator):
 
     def _gg_m_step(self, t, delta, Nhat):
         initial = np.array([self.a_, self.d_, self.p_])
-        initial_value, initial_gradient = self._gg_value_and_grad(initial, t, delta, Nhat)
-        if (
-            self._latency_optimizer._log_objective_is_invalid(
-                self._latent_model, initial_value
-            )
-            or not np.all(np.isfinite(initial_gradient))
-        ):
+        initial_value, initial_gradient = self._gg_value_and_grad(
+            initial, t, delta, Nhat
+        )
+        if self._latency_optimizer._log_objective_is_invalid(
+            self._latent_model, initial_value
+        ) or not np.all(np.isfinite(initial_gradient)):
             raise FloatingPointError("Initial generalized-gamma objective is invalid.")
         result = minimize(
             fun=self._gg_value_and_grad,
@@ -482,12 +479,9 @@ class GradientBoostingCure(BaseCureEstimator):
         raw_valid = self._valid_gamma_result(result) and np.all(result.x > 0)
         if raw_valid:
             value, gradient = self._gg_value_and_grad(result.x, t, delta, Nhat)
-            raw_valid = (
-                not self._latency_optimizer._log_objective_is_invalid(
-                    self._latent_model, value
-                )
-                and np.all(np.isfinite(gradient))
-            )
+            raw_valid = not self._latency_optimizer._log_objective_is_invalid(
+                self._latent_model, value
+            ) and np.all(np.isfinite(gradient))
         if not raw_valid:
             result = minimize(
                 fun=self._gg_log_value_and_grad,
@@ -508,12 +502,9 @@ class GradientBoostingCure(BaseCureEstimator):
                     "Generalized-gamma optimization returned an invalid objective."
                 )
             value, gradient = self._gg_log_value_and_grad(result.x, t, delta, Nhat)
-            if (
-                self._latency_optimizer._log_objective_is_invalid(
-                    self._latent_model, value
-                )
-                or not np.all(np.isfinite(gradient))
-            ):
+            if self._latency_optimizer._log_objective_is_invalid(
+                self._latent_model, value
+            ) or not np.all(np.isfinite(gradient)):
                 raise RuntimeError(
                     "Generalized-gamma optimization returned an invalid objective."
                 )
@@ -530,14 +521,15 @@ class GradientBoostingCure(BaseCureEstimator):
             )
         # Reevaluate in natural coordinates after the log transformation too;
         # cached optimizer success cannot justify a worsening EM update.
-        final_value, final_gradient = self._gg_value_and_grad(parameters, t, delta, Nhat)
-        if (
-            self._latency_optimizer._log_objective_is_invalid(
-                self._latent_model, final_value
+        final_value, final_gradient = self._gg_value_and_grad(
+            parameters, t, delta, Nhat
+        )
+        if self._latency_optimizer._log_objective_is_invalid(
+            self._latent_model, final_value
+        ) or not np.all(np.isfinite(final_gradient)):
+            raise RuntimeError(
+                "Generalized-gamma optimization returned an invalid objective."
             )
-            or not np.all(np.isfinite(final_gradient))
-        ):
-            raise RuntimeError("Generalized-gamma optimization returned an invalid objective.")
         tolerance = 64.0 * np.finfo(float).eps * (1.0 + abs(initial_value))
         if final_value > initial_value + tolerance:
             return
@@ -696,7 +688,9 @@ class GradientBoostingCure(BaseCureEstimator):
         validation_reference = -np.inf
         no_improvement = 0
         if validation is not None:
-            self.initial_validation_loglik_ = self._validation_loglikelihood(*validation)
+            self.initial_validation_loglik_ = self._validation_loglikelihood(
+                *validation
+            )
             self.best_validation_loglik_ = self.initial_validation_loglik_
             validation_reference = self.best_validation_loglik_
         for iteration in range(self.max_em_iter):
@@ -850,4 +844,3 @@ class GradientBoostingCure(BaseCureEstimator):
             self._latency,
             eta,
         )
-

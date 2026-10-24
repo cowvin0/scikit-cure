@@ -1,5 +1,3 @@
-"""Kernel interoperability and legacy GGKM kernel regression tests."""
-
 import numpy as np
 import pytest
 from scipy.spatial.distance import cdist
@@ -12,10 +10,16 @@ from sksurv.util import Surv
 from skcure.ggkm import GGKM
 from skcure.utils.kernels import wavelet_kernel
 
-
 SKLEARN_KERNELS = [
-    "linear", "rbf", "poly", "polynomial", "laplacian", "sigmoid",
-    "cosine", "chi2", "additive_chi2",
+    "linear",
+    "rbf",
+    "poly",
+    "polynomial",
+    "laplacian",
+    "sigmoid",
+    "cosine",
+    "chi2",
+    "additive_chi2",
 ]
 
 
@@ -33,10 +37,14 @@ def test_ggkm_does_not_inherit_kernel_implementation():
 
 @pytest.mark.parametrize("kernel", SKLEARN_KERNELS)
 @pytest.mark.parametrize("training", [False, True], ids=["rectangular", "training"])
-@pytest.mark.parametrize("parameters", [
-    {"gamma": 1.0, "degree": 3, "coef0": 0.0},
-    {"gamma": 0.4, "degree": 2, "coef0": 0.7},
-], ids=["defaults", "custom-parameters"])
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        {"gamma": 1.0, "degree": 3, "coef0": 0.0},
+        {"gamma": 0.4, "degree": 2, "coef0": 0.7},
+    ],
+    ids=["defaults", "custom-parameters"],
+)
 def test_named_kernels_match_sklearn(kernel, training, parameters, feature_matrices):
     X, Y = feature_matrices
     if training:
@@ -89,10 +97,13 @@ def test_custom_named_kernels_preserve_formulas(kernel, training, feature_matric
     np.testing.assert_allclose(observed, expected, rtol=1e-13, atol=1e-14)
 
 
-@pytest.mark.parametrize("scale,expected", [
-    (1.0e-308, np.eye(3)),
-    (1.0e308, np.ones((3, 3))),
-])
+@pytest.mark.parametrize(
+    "scale,expected",
+    [
+        (1.0e-308, np.eye(3)),
+        (1.0e308, np.ones((3, 3))),
+    ],
+)
 def test_wavelet_extreme_scale_preserves_finite_diagonal(scale, expected):
     X = np.array([[-1.0, 2.0], [0.0, 0.0], [1.0, 3.0]])
     with np.errstate(over="raise", invalid="raise", divide="raise"):
@@ -132,13 +143,17 @@ def test_unknown_kernel_is_rejected(feature_matrices):
 
 
 @pytest.mark.parametrize("kernel", ["rbf", "cauchy", "wavelet"])
-@pytest.mark.parametrize("X,Y", [
-    (np.ones(3), np.ones((2, 3))),
-    (np.ones((2, 3)), np.ones(3)),
-    (np.ones((2, 3)), np.ones((2, 2))),
-    (np.array([[np.nan, 1.0]]), np.ones((2, 2))),
-    (np.ones((2, 2)), np.array([[1.0, np.inf]])),
-], ids=["one-dimensional-X", "one-dimensional-Y", "feature-count", "nan", "inf"])
+@pytest.mark.parametrize(
+    "X,Y",
+    [
+        (np.ones(3), np.ones((2, 3))),
+        (np.ones((2, 3)), np.ones(3)),
+        (np.ones((2, 3)), np.ones((2, 2))),
+        (np.array([[np.nan, 1.0]]), np.ones((2, 2))),
+        (np.ones((2, 2)), np.array([[1.0, np.inf]])),
+    ],
+    ids=["one-dimensional-X", "one-dimensional-Y", "feature-count", "nan", "inf"],
+)
 def test_kernel_inputs_require_compatible_finite_matrices(kernel, X, Y):
     with pytest.raises(ValueError):
         GGKM(kernel=kernel)._compute_kernel(X, Y)
@@ -165,13 +180,19 @@ def test_matrix_callable_survives_clone_fit_and_prediction(survival_data):
         return pairwise_kernels(X1, X2, metric="rbf", gamma=scale)
 
     parameters = {"scale": 0.4}
-    original = GGKM(kernel=matrix_rbf, kernel_params=parameters,
-                    lambda_reg=0.1, max_em_iter=1)
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    original = GGKM(
+        kernel=matrix_rbf, kernel_params=parameters, lambda_reg=0.1, max_em_iter=1
+    )
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model = clone(original).fit(X, y)
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
-        expected_model = GGKM(kernel="rbf", gamma=0.4,
-                              lambda_reg=0.1, max_em_iter=1).fit(X, y)
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
+        expected_model = GGKM(
+            kernel="rbf", gamma=0.4, lambda_reg=0.1, max_em_iter=1
+        ).fit(X, y)
 
     np.testing.assert_allclose(model.K_, expected_model.K_)
     np.testing.assert_allclose(model.predict(X[:3]), expected_model.predict(X[:3]))
@@ -187,15 +208,20 @@ def fitted_precomputed_models(survival_data):
     X, y = survival_data
     gram = pairwise_kernels(X, X, metric="rbf", gamma=0.4)
     common = {"lambda_reg": 0.1, "max_em_iter": 1}
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model = GGKM(kernel="precomputed", **common).fit(gram, y)
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         reference = GGKM(kernel="rbf", gamma=0.4, **common).fit(X, y)
     return model, reference
 
 
 def test_precomputed_kernels_match_feature_based_fit_and_predictions(
-    survival_data, fitted_precomputed_models,
+    survival_data,
+    fitted_precomputed_models,
 ):
     X, _ = survival_data
     model, reference = fitted_precomputed_models
@@ -221,7 +247,8 @@ def test_precomputed_training_kernel_must_be_square(survival_data):
 
 @pytest.mark.parametrize("n_columns", [11, 13])
 def test_precomputed_prediction_requires_one_column_per_training_sample(
-    fitted_precomputed_models, n_columns,
+    fitted_precomputed_models,
+    n_columns,
 ):
     model, _ = fitted_precomputed_models
     with pytest.raises(ValueError):
@@ -237,7 +264,9 @@ def test_precomputed_kernels_support_grid_search_pairwise_slicing(survival_data)
         cv=KFold(n_splits=2),
         error_score="raise",
     )
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         search.fit(gram, y)
 
     assert np.all(np.isfinite(search.cv_results_["mean_test_score"]))

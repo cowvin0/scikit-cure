@@ -1,5 +1,3 @@
-"""Public fitting diagnostics, solver controls, and latent-count semantics."""
-
 from copy import deepcopy
 from types import SimpleNamespace
 import importlib
@@ -86,7 +84,8 @@ def test_cap_warns_and_publishes_optimizer_diagnostics(estimator):
     assert model.termination_reason_ == "max_em_iter"
     assert not model.converged_
     assert [record["stage"] for record in model.optimizer_results_] == [
-        "incidence", "latency"
+        "incidence",
+        "latency",
     ]
     for record in model.optimizer_results_:
         assert record["iteration"] == 1
@@ -139,7 +138,9 @@ def test_per_stage_solver_options_reach_each_optimizer_without_mutation(monkeypa
 
         monkeypatch.setattr(module, "minimize", traced)
     model = GGKM(
-        latent_distribution="nb", max_em_iter=1, lambda_reg=0.1,
+        latent_distribution="nb",
+        max_em_iter=1,
+        lambda_reg=0.1,
         solver_options=settings,
     )
     assert model.solver_options is settings

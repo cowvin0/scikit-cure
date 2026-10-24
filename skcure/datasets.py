@@ -1,5 +1,3 @@
-"""Reproducible synthetic cure data with observable and latent ground truth."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,7 +9,6 @@ from numpy.polynomial.hermite import hermgauss
 from scipy.optimize import root_scalar
 from scipy.special import expit, log_expit, log_ndtr, logit, ndtr, ndtri_exp
 from sksurv.util import Surv
-
 
 LATENT_DISTRIBUTIONS = ("binomial", "poisson", "negative_binomial")
 
@@ -78,7 +75,9 @@ class CureSimulation:
         """Return the true conditional population survival on a time grid."""
         grid = np.asarray(times, dtype=float)
         if grid.ndim != 1 or not np.all(np.isfinite(grid)) or np.any(grid < 0):
-            raise ValueError("times must be a finite, non-negative one-dimensional array.")
+            raise ValueError(
+                "times must be a finite, non-negative one-dimensional array."
+            )
         if self.latency == "weibull":
             with np.errstate(over="ignore", under="ignore"):
                 hazard = grid**self.latency_shape
@@ -122,7 +121,9 @@ class CureSimulation:
             log_cumulative_mean = eta + np.log(latent_cdf)
             if self.latent_distribution == "poisson":
                 return np.exp(-np.exp(log_cumulative_mean))
-            return np.exp(_negative_binomial_log_survival(log_cumulative_mean, self.phi))
+            return np.exp(
+                _negative_binomial_log_survival(log_cumulative_mean, self.phi)
+            )
 
 
 def simulate_cure_survival(
@@ -167,41 +168,70 @@ def simulate_cure_survival(
     CDF without constructing one event time per latent cause.
     """
     for name, value in (("n_samples", n_samples), ("n_features", n_features)):
-        if not isinstance(value, Integral) or isinstance(value, (bool, np.bool_)) or value < 1:
+        if (
+            not isinstance(value, Integral)
+            or isinstance(value, (bool, np.bool_))
+            or value < 1
+        ):
             raise ValueError(f"{name} must be a positive integer.")
     if not isinstance(cure_fraction, Real) or not 0 < cure_fraction < 1:
         raise ValueError("cure_fraction must lie strictly between zero and one.")
     if latency not in ("weibull", "lognormal"):
         raise ValueError("latency must be 'weibull' or 'lognormal'.")
-    if not isinstance(latency_shape, Real) or not np.isfinite(float(latency_shape)) or latency_shape <= 0:
+    if (
+        not isinstance(latency_shape, Real)
+        or not np.isfinite(float(latency_shape))
+        or latency_shape <= 0
+    ):
         raise ValueError("latency_shape must be positive and finite.")
-    if not isinstance(censoring_rate, Real) or not np.isfinite(float(censoring_rate)) or censoring_rate < 0:
+    if (
+        not isinstance(censoring_rate, Real)
+        or not np.isfinite(float(censoring_rate))
+        or censoring_rate < 0
+    ):
         raise ValueError("censoring_rate must be non-negative and finite.")
-    if followup is not None and (not isinstance(followup, Real) or not np.isfinite(float(followup)) or followup <= 0):
+    if followup is not None and (
+        not isinstance(followup, Real)
+        or not np.isfinite(float(followup))
+        or followup <= 0
+    ):
         raise ValueError("followup must be positive and finite, or None.")
     if followup is None and censoring_rate == 0:
-        raise ValueError("At least one finite censoring mechanism is needed to observe cured subjects.")
+        raise ValueError(
+            "At least one finite censoring mechanism is needed to observe cured subjects."
+        )
     if latent_distribution not in LATENT_DISTRIBUTIONS:
         raise ValueError(f"latent_distribution must be one of {LATENT_DISTRIBUTIONS}.")
     if (
-        not isinstance(K_bin, Integral) or isinstance(K_bin, (bool, np.bool_))
+        not isinstance(K_bin, Integral)
+        or isinstance(K_bin, (bool, np.bool_))
         or not 1 <= K_bin <= np.iinfo(np.int64).max
     ):
         raise ValueError("K_bin must be a positive representable integer.")
     if (
-        not isinstance(phi, Real) or isinstance(phi, (bool, np.bool_))
-        or not np.isfinite(float(phi)) or phi < 0
+        not isinstance(phi, Real)
+        or isinstance(phi, (bool, np.bool_))
+        or not np.isfinite(float(phi))
+        or phi < 0
     ):
         raise ValueError("phi must be non-negative and finite.")
-    if latent_distribution == "negative_binomial" and phi > 0 and not np.isfinite(1.0 / phi):
-        raise ValueError("phi is too small for count sampling; use phi=0 for its Poisson limit.")
+    if (
+        latent_distribution == "negative_binomial"
+        and phi > 0
+        and not np.isfinite(1.0 / phi)
+    ):
+        raise ValueError(
+            "phi is too small for count sampling; use phi=0 for its Poisson limit."
+        )
     if cure_coefficients is None:
         coefficients = np.zeros(n_features)
         coefficients[: min(2, n_features)] = [0.8, -0.6][: min(2, n_features)]
     else:
         coefficients = np.asarray(cure_coefficients, dtype=float)
         if coefficients.shape != (n_features,) or not np.all(np.isfinite(coefficients)):
-            raise ValueError("cure_coefficients must have one finite value per feature.")
+            raise ValueError(
+                "cure_coefficients must have one finite value per feature."
+            )
     standard_deviation = float(np.linalg.norm(coefficients))
     if not np.isfinite(standard_deviation):
         raise ValueError("cure_coefficients have an unrepresentable norm.")
@@ -209,6 +239,7 @@ def simulate_cure_survival(
     offsets = np.sqrt(2.0) * standard_deviation * nodes
     center = float(logit(cure_fraction))
     half_width = max(40.0, 12.0 * standard_deviation)
+
     def target(value):
         probability = _count_cure_probability(
             value + offsets, latent_distribution, K_bin, phi
@@ -220,20 +251,30 @@ def simulate_cure_survival(
             break
         half_width *= 2.0
     else:
-        raise ValueError("The requested cure fraction needs unrepresentable count parameters.")
+        raise ValueError(
+            "The requested cure fraction needs unrepresentable count parameters."
+        )
     solution = root_scalar(target, bracket=(center - half_width, center + half_width))
     if not solution.converged:
-        raise RuntimeError("Could not calibrate the requested population cure fraction.")
+        raise RuntimeError(
+            "Could not calibrate the requested population cure fraction."
+        )
     intercept = float(solution.root)
     rng = np.random.default_rng(random_state)
     X = rng.normal(size=(n_samples, n_features))
     cure_predictor = intercept + X @ coefficients
     eta = -cure_predictor
-    cure_probability = _count_cure_probability(cure_predictor, latent_distribution, K_bin, phi)
+    cure_probability = _count_cure_probability(
+        cure_predictor, latent_distribution, K_bin, phi
+    )
     with np.errstate(over="ignore", under="ignore"):
-        latent_mean = K_bin * expit(eta) if latent_distribution == "binomial" else np.exp(eta)
+        latent_mean = (
+            K_bin * expit(eta) if latent_distribution == "binomial" else np.exp(eta)
+        )
     if not np.all(np.isfinite(latent_mean)):
-        raise ValueError("Simulation parameters produced an unrepresentable latent mean.")
+        raise ValueError(
+            "Simulation parameters produced an unrepresentable latent mean."
+        )
     if latent_distribution == "binomial" and K_bin == 1:
         # Preserve the original default generator, including its seeded stream.
         cured = rng.uniform(size=n_samples) < cure_probability
@@ -255,13 +296,16 @@ def simulate_cure_survival(
                 intensity = rng.gamma(1.0 / phi, phi * latent_mean)
                 latent_count = rng.poisson(intensity)
         except ValueError as exc:
-            raise ValueError("Latent counts exceed NumPy's representable sampling range.") from exc
+            raise ValueError(
+                "Latent counts exceed NumPy's representable sampling range."
+            ) from exc
         cured = latent_count == 0
         event_time = np.full(n_samples, np.inf)
         active = ~cured
         uniforms = np.clip(
             rng.uniform(size=int(active.sum())),
-            np.nextafter(0.0, 1.0), np.nextafter(1.0, 0.0),
+            np.nextafter(0.0, 1.0),
+            np.nextafter(1.0, 0.0),
         )
         # Conditional on N, P(T > t | N) = (1-F0(t))**N.
         log_survival = np.log(uniforms) / latent_count[active]
@@ -272,11 +316,14 @@ def simulate_cure_survival(
                 log_cdf = np.log(-np.expm1(log_survival))
                 normal_quantile = np.where(
                     log_cdf < -np.log(2.0),
-                    ndtri_exp(log_cdf), -ndtri_exp(log_survival),
+                    ndtri_exp(log_cdf),
+                    -ndtri_exp(log_survival),
                 )
                 event_time[active] = np.exp(latency_shape * normal_quantile)
     if np.any(~np.isfinite(event_time[~cured])) or np.any(event_time[~cured] <= 0):
-        raise ValueError("Simulation parameters produced unrepresentable latent event times.")
+        raise ValueError(
+            "Simulation parameters produced unrepresentable latent event times."
+        )
     censoring_time = (
         rng.exponential(scale=1.0 / censoring_rate, size=n_samples)
         if censoring_rate > 0
@@ -287,13 +334,27 @@ def simulate_cure_survival(
     observed_time = np.minimum(event_time, censoring_time)
     event = event_time <= censoring_time
     if np.any(~np.isfinite(observed_time)) or np.any(observed_time <= 0):
-        raise ValueError("Simulation parameters produced non-finite or non-positive observed times.")
+        raise ValueError(
+            "Simulation parameters produced non-finite or non-positive observed times."
+        )
     y = Surv.from_arrays(event=event, time=observed_time)
     return CureSimulation(
-        X, y, cure_probability, cured, event_time, censoring_time, latency, float(latency_shape),
-        latent_distribution=latent_distribution, K_bin=int(K_bin), phi=float(phi),
-        latent_count=latent_count, latent_mean=latent_mean, incidence_predictor=eta,
-        incidence_intercept=-intercept, incidence_coefficients=-coefficients.copy(),
+        X,
+        y,
+        cure_probability,
+        cured,
+        event_time,
+        censoring_time,
+        latency,
+        float(latency_shape),
+        latent_distribution=latent_distribution,
+        K_bin=int(K_bin),
+        phi=float(phi),
+        latent_count=latent_count,
+        latent_mean=latent_mean,
+        incidence_predictor=eta,
+        incidence_intercept=-intercept,
+        incidence_coefficients=-coefficients.copy(),
     )
 
 

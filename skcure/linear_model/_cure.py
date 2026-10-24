@@ -1,5 +1,3 @@
-"""Generalized gamma cure estimators with linear incidence predictors."""
-
 from __future__ import annotations
 
 from scipy.special import expit

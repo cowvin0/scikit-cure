@@ -1,5 +1,3 @@
-"""Regression tests for linear cure models built from shared cure components."""
-
 import importlib
 import importlib.util
 import pickle
@@ -278,7 +276,9 @@ def test_fit_routes_latency_update_through_shared_optimizer(family, monkeypatch)
     monkeypatch.setattr(optimizer, "maximize", wrapped)
 
     X, y = _data()
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model.fit(X, y)
 
     assert len(calls) == 1
@@ -311,7 +311,9 @@ def test_callback_failures_propagate(family, stage, method, monkeypatch):
     monkeypatch.setattr(model, method, failed)
 
     expected_warning = (
-        pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations")
+        pytest.warns(
+            ConvergenceWarning, match="EM did not converge within 1 iterations"
+        )
         if stage == "finalize"
         else nullcontext()
     )
@@ -413,7 +415,9 @@ def test_linear_estimator_clone_and_pipeline(family):
     model = model_class(a=1.2, d=0.9, p=1.1, max_em_iter=1)
     X, y = _data()
     pipeline = make_pipeline(StandardScaler(), model)
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         assert pipeline.fit(X, y) is pipeline
     assert np.isfinite(pipeline.score(X, y))
     np.testing.assert_array_equal(
@@ -431,7 +435,9 @@ def test_fitted_pickle_preserves_composed_components(family):
     model_class, latent_class = MODEL_INFO[family]
     X, y = _data()
     X_test = X[:3]
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 1 iterations"
+    ):
         model = model_class(max_em_iter=1).fit(X, y)
 
     restored = pickle.loads(pickle.dumps(model))

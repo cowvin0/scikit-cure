@@ -1,5 +1,3 @@
-"""Contract tests for latent-count distributions."""
-
 import inspect
 
 import pytest
@@ -10,7 +8,6 @@ from skcure._latent import (
     _NegativeBinomialLatentModel,
     _PoissonLatentModel,
 )
-
 
 REQUIRED_METHODS = {
     "incidence_value_and_grad",

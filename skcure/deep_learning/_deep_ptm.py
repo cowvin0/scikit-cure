@@ -1,5 +1,3 @@
-"""Scikit-cure interface to DeepCure's Deep Promotion Time Cure Model."""
-
 from math import isfinite
 from numbers import Integral, Real
 
@@ -326,13 +324,17 @@ class DeepPromotionTimeCure(BaseCureEstimator):
         for index, size in enumerate(self.hidden_layers):
             layers.append(
                 tf.keras.layers.Dense(
-                    int(size), activation=self.activation, name=f"hidden_{index + 1}",
+                    int(size),
+                    activation=self.activation,
+                    name=f"hidden_{index + 1}",
                     dtype="float64",
                 )
             )
             if self.dropout:
                 layers.append(tf.keras.layers.Dropout(self.dropout, dtype="float64"))
-        layers.append(tf.keras.layers.Dense(1, activation="linear", name="eta", dtype="float64"))
+        layers.append(
+            tf.keras.layers.Dense(1, activation="linear", name="eta", dtype="float64")
+        )
         model = _StableDeepPTM(
             stack_eta=layers,
             t_func=self.t_func,
@@ -546,9 +548,13 @@ class DeepPromotionTimeCure(BaseCureEstimator):
                 widths = np.diff(breakpoints)
                 elapsed = np.clip(times[:, None] - breakpoints[:-1], 0.0, widths)
                 elapsed[:, -1] = np.maximum(times - breakpoints[-2], 0.0)
-                log_hazard = logsumexp(
-                    np.log(elapsed) + np.log(self.baseline_parameters_), axis=1
+                log_hazard = np.asarray(
+                    logsumexp(
+                        np.log(elapsed) + np.log(self.baseline_parameters_), axis=1
+                    ),
+                    dtype=float,
                 )
+            log_hazard = np.asarray(log_hazard, dtype=float)
             regular = log_hazard >= -36.0
             result = log_hazard.copy()
             result[regular] = np.log(

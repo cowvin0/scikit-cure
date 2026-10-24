@@ -1,5 +1,3 @@
-"""Contracts for the shared, model-independent EM iteration driver."""
-
 from contextlib import nullcontext
 from types import SimpleNamespace
 
@@ -34,7 +32,9 @@ def test_ordered_m_steps_receive_latest_parameters_and_one_shared_expectation():
         calls.append(("second", parameters, expectation))
         return 2 * parameters
 
-    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+    with pytest.warns(
+        ConvergenceWarning, match="EM did not converge within 2 iterations"
+    ):
         parameters, final_loglik = run_em(
             1,
             e_step=e_step,
@@ -82,9 +82,8 @@ def test_normal_missing_data_em_can_use_dictionary_parameters():
         {"mean": 0.0, "updates": 0},
         e_step=lambda parameters: parameters["mean"],
         m_steps=(update_mean,),
-        loglikelihood=lambda parameters: -0.5 * np.sum(
-            (observed - parameters["mean"]) ** 2
-        ),
+        loglikelihood=lambda parameters: -0.5
+        * np.sum((observed - parameters["mean"]) ** 2),
         state=state,
         tol=1e-12,
         max_iter=100,
@@ -109,8 +108,13 @@ def test_normal_missing_data_em_can_use_dictionary_parameters():
 )
 def test_stopping_rules(tol, max_iter, expected_history, converged):
     state = _state()
-    expectation = nullcontext() if converged else pytest.warns(
-        ConvergenceWarning, match=f"EM did not converge within {max_iter} iterations"
+    expectation = (
+        nullcontext()
+        if converged
+        else pytest.warns(
+            ConvergenceWarning,
+            match=f"EM did not converge within {max_iter} iterations",
+        )
     )
     with expectation:
         parameters, final_loglik = run_em(
@@ -183,7 +187,9 @@ def test_initial_validator_runs_once_before_the_first_iteration(reject_initial):
         assert state.loglik_history == []
         assert not state.converged
     else:
-        with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+        with pytest.warns(
+            ConvergenceWarning, match="EM did not converge within 2 iterations"
+        ):
             run_em(0, **arguments)
         assert calls == [
             ("likelihood", 0),

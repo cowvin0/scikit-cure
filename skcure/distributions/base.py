@@ -1,5 +1,3 @@
-"""Interfaces for latency distributions used by cure models."""
-
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable

@@ -1,5 +1,3 @@
-"""Cure models with the scikit-survival estimator interface."""
-
 from .base import BaseCureEstimator
 from .deep_learning import DeepPromotionTimeCure
 from .ensemble import GradientBoostingCure

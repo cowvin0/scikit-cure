@@ -1,5 +1,3 @@
-"""Repeated-study bookkeeping, specification labels, and failure visibility."""
-
 import importlib.util
 import json
 from pathlib import Path
@@ -41,22 +39,34 @@ class _ControlledEstimator:
         return np.zeros(len(X))
 
     def predict_cure_probability(self, X):
-        return np.full(len(X), .3)
+        return np.full(len(X), 0.3)
 
     def predict_survival(self, X, times):
-        return np.tile(.3 + .7 * np.exp(-np.asarray(times)), (len(X), 1))
+        return np.tile(0.3 + 0.7 * np.exp(-np.asarray(times)), (len(X), 1))
 
 
-def test_study_retains_all_attempts_and_computes_repetition_mcse(benchmark, monkeypatch):
-    outcomes = {"mixture": "converged", "promotion_time": "max_em_iter", "ggkm": "failed"}
+def test_study_retains_all_attempts_and_computes_repetition_mcse(
+    benchmark, monkeypatch
+):
+    outcomes = {
+        "mixture": "converged",
+        "promotion_time": "max_em_iter",
+        "ggkm": "failed",
+    }
     monkeypatch.setattr(
-        benchmark, "_make_model",
+        benchmark,
+        "_make_model",
         lambda name, **kwargs: _ControlledEstimator(outcomes[name]),
     )
     result = benchmark.run_benchmark(
-        repetitions=3, sample_sizes=(80,), censoring_rates=(.1,),
-        followups=(5,), latencies=("weibull",), latent_distributions=("binomial",),
-        model_names=tuple(outcomes), test_size=100,
+        repetitions=3,
+        sample_sizes=(80,),
+        censoring_rates=(0.1,),
+        followups=(5,),
+        latencies=("weibull",),
+        latent_distributions=("binomial",),
+        model_names=tuple(outcomes),
+        test_size=100,
     )
     assert len(result["attempts"]) == 9
     summaries = {item["model"]: item for item in result["summaries"]}
@@ -69,11 +79,22 @@ def test_study_retains_all_attempts_and_computes_repetition_mcse(benchmark, monk
     assert summaries["ggkm"]["failure_rate"] == 1
     assert summaries["ggkm"]["cure_rmse"] is None
     assert summaries["ggkm"]["correctly_specified"] is None
-    values = [item["cure_rmse"] for item in result["attempts"] if item["model"] == "mixture"]
+    values = [
+        item["cure_rmse"] for item in result["attempts"] if item["model"] == "mixture"
+    ]
     assert summaries["mixture"]["cure_rmse"] == pytest.approx(np.mean(values))
-    assert summaries["mixture"]["cure_rmse_mcse"] == pytest.approx(np.std(values, ddof=1) / np.sqrt(3))
+    assert summaries["mixture"]["cure_rmse_mcse"] == pytest.approx(
+        np.std(values, ddof=1) / np.sqrt(3)
+    )
     for item in result["attempts"]:
-        assert {"train_seed", "test_seed", "fit_seed", "estimator_parameters", "warnings", "seconds"} <= item.keys()
+        assert {
+            "train_seed",
+            "test_seed",
+            "fit_seed",
+            "estimator_parameters",
+            "warnings",
+            "seconds",
+        } <= item.keys()
         if item["model"] == "ggkm":
             assert "deliberate fit failure" in item["error"]
         if item["model"] == "promotion_time":
@@ -82,17 +103,26 @@ def test_study_retains_all_attempts_and_computes_repetition_mcse(benchmark, monk
     json.dumps(result, allow_nan=False)
 
 
-def test_unsupported_observed_metrics_do_not_discard_fit_or_truth_errors(benchmark, monkeypatch):
-    monkeypatch.setattr(benchmark, "_make_model", lambda *args, **kwargs: _ControlledEstimator())
+def test_unsupported_observed_metrics_do_not_discard_fit_or_truth_errors(
+    benchmark, monkeypatch
+):
+    monkeypatch.setattr(
+        benchmark, "_make_model", lambda *args, **kwargs: _ControlledEstimator()
+    )
 
     def unsupported(*args, **kwargs):
         raise ValueError("unsupported censoring support")
 
     monkeypatch.setattr(benchmark, "_observed_metrics", unsupported)
     result = benchmark.run_benchmark(
-        repetitions=1, sample_sizes=(40,), censoring_rates=(.1,), followups=(5,),
-        latencies=("weibull",), latent_distributions=("poisson",),
-        model_names=("promotion_time",), test_size=30,
+        repetitions=1,
+        sample_sizes=(40,),
+        censoring_rates=(0.1,),
+        followups=(5,),
+        latencies=("weibull",),
+        latent_distributions=("poisson",),
+        model_names=("promotion_time",),
+        test_size=30,
     )
     attempt = result["attempts"][0]
     assert not attempt["failed"]
@@ -108,17 +138,26 @@ def test_unsupported_observed_metrics_do_not_discard_fit_or_truth_errors(benchma
 @pytest.mark.parametrize("family", ["binomial", "poisson", "negative_binomial"])
 def test_flexible_model_factory_matches_truth_count_parameters(benchmark, family):
     for name in ("ggkm", "gradient_boosting"):
-        model = benchmark._make_model(name, latent_distribution=family, K_bin=3, random_state=41)
+        model = benchmark._make_model(
+            name, latent_distribution=family, K_bin=3, random_state=41
+        )
         assert model.latent_distribution == family
         assert model.K_bin == 3
         if name == "gradient_boosting":
             assert model.random_state == 41
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"repetitions": 0}, {"repetitions": True}, {"model_names": ()},
-    {"latent_distributions": ("invalid",)}, {"test_size": 1}, {"sample_sizes": ()},
-])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"repetitions": 0},
+        {"repetitions": True},
+        {"model_names": ()},
+        {"latent_distributions": ("invalid",)},
+        {"test_size": 1},
+        {"sample_sizes": ()},
+    ],
+)
 def test_invalid_benchmark_configuration_is_rejected(benchmark, kwargs):
     with pytest.raises(ValueError):
         benchmark.run_benchmark(**kwargs)
