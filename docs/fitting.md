@@ -40,6 +40,10 @@ stage, EM iteration, success, status, message, objective, and available
 iteration/evaluation counts. An unsuccessful inner solve can sometimes
 supply an acceptable update; inspect these records as well as the outer
 convergence flag. `loglik_history_` records completed EM iterations.
+The generalized-gamma latency solver can restart once after an abnormal
+line-search termination at a finite, valid point. Both attempts are recorded;
+the returned update still requires successful optimization and a finite,
+non-worsening objective. Explicit solver options are retained on the retry.
 `termination_reason_` is `converged`, `max_em_iter`, or `failed` for GGKM
 and linear models; a raised exception can leave partial diagnostics.
 

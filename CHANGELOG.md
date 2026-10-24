@@ -2,6 +2,9 @@
 
 ## Unreleased — 0.1.0.dev0
 
+- Recover finite generalized-gamma latency line-search failures with one
+  validated restart, addressing a Windows warm-refit failure. Keep optional
+  JAX imports compatible with type checking when the extra is absent.
 - Organize estimators in `skcure.ggkm`, `skcure.ensemble`,
   `skcure.linear_model`, and `skcure.deep_learning`.
 - Unify gradient boosting cure families in `GradientBoostingCure` and add

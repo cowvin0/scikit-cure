@@ -137,8 +137,9 @@ def pgamma_shape_derivative_vec(u, shape, *, backend="scipy") -> np.ndarray:
     if backend != "jax":
         raise ValueError("backend must be 'scipy' or 'jax'.")
     try:
-        import jax
-        import jax.numpy as jnp
+        # JAX is an optional extra and is absent from the core typing job.
+        import jax  # pyright: ignore[reportMissingImports]
+        import jax.numpy as jnp  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
         raise ImportError(
             "The JAX backend requires the optional 'jax' dependency. "

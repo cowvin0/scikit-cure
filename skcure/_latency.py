@@ -628,9 +628,8 @@ class _GeneralizedGammaLatencyOptimizer:
             )
         )
 
-        result_gg = minimize(
+        optimizer_arguments = dict(
             fun=objective,
-            x0=log_gg_start,
             jac=True,
             args=(
                 t,
@@ -652,11 +651,53 @@ class _GeneralizedGammaLatencyOptimizer:
                     None,
                 ),
             ],
+        )
+
+        result_gg = minimize(
+            x0=log_gg_start,
             options=options,
+            **optimizer_arguments,
         )
 
         if result_callback is not None:
             result_callback(result_gg)
+
+        # A failed line search can leave a useful finite iterate, especially
+        # when large p makes log(a) much more sensitive than log(d) or log(p).
+        # Restart with a fresh Hessian approximation instead of accepting the
+        # unsuccessful result. The cached fun of an ABNORMAL result can belong
+        # to a rejected trial, so select the restart point from fresh values.
+        if (
+            not result_gg.success
+            and getattr(result_gg, "status", None) == 2
+            and "ABNORMAL" in str(result_gg.message).upper()
+            and np.shape(result_gg.x) == (3,)
+            and np.all(np.isfinite(result_gg.x))
+            and np.all(result_gg.x >= log_gg_lower)
+            and np.all(result_gg.x <= _maximum_log_float())
+        ):
+            retry_value, retry_gradient = objective(result_gg.x, t, delta, expected)
+            start_value, start_gradient = objective(log_gg_start, t, delta, expected)
+            if (
+                np.isfinite(retry_value)
+                and np.all(np.isfinite(retry_gradient))
+                and np.isfinite(start_value)
+                and np.all(np.isfinite(start_gradient))
+            ):
+                retry_start = (
+                    result_gg.x if retry_value <= start_value else log_gg_start
+                )
+                retry_options = dict(options or {})
+                # Extra line-search work is a recovery default. Explicit
+                # caller limits and convergence tolerances remain unchanged.
+                retry_options.setdefault("maxls", 100)
+                result_gg = minimize(
+                    x0=retry_start,
+                    options=retry_options,
+                    **optimizer_arguments,
+                )
+                if result_callback is not None:
+                    result_callback(result_gg)
 
         self._validate_result(
             latent_model,
