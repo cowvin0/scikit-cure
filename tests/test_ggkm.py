@@ -1,3 +1,5 @@
+"""Estimator contract and scientific regression tests for GGKM."""
+
 import inspect
 import pickle
 

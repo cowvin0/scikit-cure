@@ -1,3 +1,15 @@
+"""Upstream estimator checks with survival-aware targets.
+
+scikit-learn's generic fitting checks generate numeric class/regression labels,
+whereas scikit-survival requires structured event/time records. The test-only
+subclasses below convert those labels to positive, completely observed event
+times. They inherit the public estimator constructors and delegate fitting and
+scoring directly, so parameter mutation, validation, prediction and serialization
+are still checked on the real implementations. This is a selected compatibility
+suite, not a claim that generic classifier/regressor checks all apply to survival
+estimators.
+"""
+
 from contextlib import contextmanager
 from copy import deepcopy
 import warnings

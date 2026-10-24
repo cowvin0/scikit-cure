@@ -1,3 +1,5 @@
+"""Training budgets, validation isolation, and ensemble-prefix predictions."""
+
 import numpy as np
 import pandas as pd
 import pytest

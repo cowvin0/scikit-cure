@@ -1,3 +1,5 @@
+"""Contract tests for latent-count distributions."""
+
 import inspect
 
 import pytest

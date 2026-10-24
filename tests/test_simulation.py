@@ -1,3 +1,5 @@
+"""Scientific checks against known latent cure and survival probabilities."""
+
 from dataclasses import replace
 
 import numpy as np

@@ -1,3 +1,5 @@
+"""Contract tests for susceptible-event-time latency distributions."""
+
 import numpy as np
 import pytest
 

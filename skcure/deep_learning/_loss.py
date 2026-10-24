@@ -1,3 +1,10 @@
+"""Stable DeepPTM training endpoint, imported only with the optional backend.
+
+The upstream model architecture is retained. Its original loss subtracts two
+exponentials to evaluate ``theta * (1 - exp(-H0))``; this endpoint evaluates
+that quantity in the log domain instead.
+"""
+
 from typing import Any
 
 import numpy as np

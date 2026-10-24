@@ -1,3 +1,11 @@
+"""GGKM EM coverage for kernels, latent families, refits, and fit failures.
+
+The historical fixture still verifies unchanged configuration, inputs, and
+initialization. Fitted numerical results are checked against independent model
+equations and gradient differences: stable tail formulas can legitimately alter
+the trajectory of the ill-conditioned latency optimization.
+"""
+
 from contextlib import contextmanager, nullcontext
 import json
 from pathlib import Path

@@ -1,3 +1,5 @@
+"""Recovery from finite L-BFGS-B latency line-search failures."""
+
 from types import SimpleNamespace
 
 import numpy as np

@@ -1,3 +1,10 @@
+"""Observed-data survival evaluation and model-implied cure diagnostics.
+
+Right censoring does not reveal which event-free individuals are cured. The
+``model_implied_*`` diagnostics use predicted probabilities as their own class
+weights and therefore do not measure accuracy against observed outcomes.
+"""
+
 from __future__ import annotations
 
 import numpy as np

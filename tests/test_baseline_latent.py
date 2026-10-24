@@ -1,3 +1,5 @@
+"""The linear baselines share the count-family strategies used by GGKM."""
+
 import pickle
 
 import numpy as np

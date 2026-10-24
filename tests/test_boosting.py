@@ -1,3 +1,10 @@
+"""Boosting estimator contracts, legacy tree updates, and numerical formulas.
+
+The saved legacy results come from an independent, unmodified source snapshot.
+Free optimization is compared separately from the frozen-latency tree updates:
+using the stable generalized-gamma tail can change an optimizer's trajectory.
+"""
+
 import inspect
 import json
 from pathlib import Path

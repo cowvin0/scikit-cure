@@ -1,3 +1,5 @@
+"""Repeated-study bookkeeping, specification labels, and failure visibility."""
+
 import importlib.util
 import json
 from pathlib import Path

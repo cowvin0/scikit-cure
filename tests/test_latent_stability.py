@@ -1,3 +1,5 @@
+"""Numerical limits of the shared fixed-predictor count families."""
+
 from types import SimpleNamespace
 
 import numpy as np

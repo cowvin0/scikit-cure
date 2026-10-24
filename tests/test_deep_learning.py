@@ -1,3 +1,10 @@
+"""Estimator and backend orchestration contracts for the optional deep model.
+
+The small backend double isolates scikit-cure's validation, model selection,
+refit lifecycle, and probability calculations from expensive neural training.
+The integration tests exercise the real upstream implementation separately.
+"""
+
 import builtins
 import inspect
 from pathlib import Path

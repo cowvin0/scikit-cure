@@ -1,3 +1,5 @@
+"""Regression tests for linear cure models built from shared cure components."""
+
 import importlib
 import importlib.util
 import pickle

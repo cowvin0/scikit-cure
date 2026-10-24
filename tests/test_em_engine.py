@@ -1,3 +1,5 @@
+"""Contracts for the shared, model-independent EM iteration driver."""
+
 from contextlib import nullcontext
 from types import SimpleNamespace
 

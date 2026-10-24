@@ -1,3 +1,5 @@
+"""Scikit-cure interface to DeepCure's Deep Promotion Time Cure Model."""
+
 from math import isfinite
 from numbers import Integral, Real
 
@@ -548,13 +550,9 @@ class DeepPromotionTimeCure(BaseCureEstimator):
                 widths = np.diff(breakpoints)
                 elapsed = np.clip(times[:, None] - breakpoints[:-1], 0.0, widths)
                 elapsed[:, -1] = np.maximum(times - breakpoints[-2], 0.0)
-                log_hazard = np.asarray(
-                    logsumexp(
-                        np.log(elapsed) + np.log(self.baseline_parameters_), axis=1
-                    ),
-                    dtype=float,
+                log_hazard = logsumexp(
+                    np.log(elapsed) + np.log(self.baseline_parameters_), axis=1
                 )
-            log_hazard = np.asarray(log_hazard, dtype=float)
             regular = log_hazard >= -36.0
             result = log_hazard.copy()
             result[regular] = np.log(

@@ -1,3 +1,5 @@
+"""Kernel interoperability and legacy GGKM kernel regression tests."""
+
 import numpy as np
 import pytest
 from scipy.spatial.distance import cdist

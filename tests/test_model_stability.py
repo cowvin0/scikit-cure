@@ -1,3 +1,5 @@
+"""Numerical regression cases for predictor fitting and public predictions."""
+
 from types import SimpleNamespace
 
 import numpy as np

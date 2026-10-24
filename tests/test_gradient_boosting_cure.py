@@ -1,3 +1,5 @@
+"""Unified ensemble API and latent-family fit lifecycle."""
+
 import inspect
 import json
 from pathlib import Path

@@ -1,3 +1,5 @@
+"""Observed-data evaluation uses the correct prediction scale and population."""
+
 import numpy as np
 import pytest
 from numpy.testing import assert_allclose

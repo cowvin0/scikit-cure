@@ -1,3 +1,5 @@
+"""Failed refits expose fresh diagnostics and reject worsening dispersion."""
+
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch

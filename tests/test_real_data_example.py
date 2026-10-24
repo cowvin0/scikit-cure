@@ -1,3 +1,5 @@
+"""Real-cohort evaluation support, split isolation, and failure reporting."""
+
 from collections import Counter
 import json
 import warnings

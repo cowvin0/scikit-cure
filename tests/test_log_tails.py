@@ -1,3 +1,5 @@
+"""Regression tests for probabilities and M-steps beyond ordinary tail ranges."""
+
 from types import SimpleNamespace
 
 import numpy as np

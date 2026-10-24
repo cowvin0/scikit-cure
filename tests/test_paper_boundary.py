@@ -1,3 +1,5 @@
+"""The installed library excludes estimators used only for the GGKM paper."""
+
 import importlib.util
 from pathlib import Path
 import subprocess

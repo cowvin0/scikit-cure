@@ -1,3 +1,5 @@
+"""The public EM iteration parameter has one contract across cure estimators."""
+
 import inspect
 
 import numpy as np

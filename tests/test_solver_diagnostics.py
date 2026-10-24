@@ -1,3 +1,5 @@
+"""Public fitting diagnostics, solver controls, and latent-count semantics."""
+
 from copy import deepcopy
 from types import SimpleNamespace
 import importlib

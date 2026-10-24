@@ -1,3 +1,5 @@
+"""Gamma shape derivatives without import-time JAX or global configuration."""
+
 import os
 import subprocess
 import sys
