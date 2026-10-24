@@ -115,7 +115,7 @@ def test_unified_tree_updates_match_independent_legacy_fixture(
         model.model_weights_, expected["weights"], rtol=0, atol=1e-6
     )
     np.testing.assert_allclose(
-        model.loglik_history_, expected["loglik_history"], rtol=0, atol=1e-6
+        model.loglik_history_, expected["loglik_history"], rtol=0, atol=5e-6
     )
 
 
@@ -302,12 +302,11 @@ def test_unified_estimator_supports_pipeline_and_family_grid_search(survival_dat
         direct.predict(frame[["second", "first"]])
 
 
-def test_none_em_limit_resolves_to_unified_default(survival_data):
+def test_omitted_em_limit_uses_public_constructor_default(survival_data):
     model = GradientBoostingCure(
-        max_em_iter=None, tol=1e100, n_estimators=1, min_samples_leaf=3
+        tol=1e100, n_estimators=1, min_samples_leaf=3
     ).fit(*survival_data)
-    assert model.get_params()["max_em_iter"] is None
-    assert model._max_em_iter == 1000
+    assert model.get_params()["max_em_iter"] == 1000
     assert model.n_iter_ == 1
 
 

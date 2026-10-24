@@ -258,6 +258,44 @@ def test_curve_and_cumulative_hazard_formats(backend, survival_data):
         np.testing.assert_allclose(hazard(model.unique_times_), -np.log(expected[i]))
 
 
+@pytest.mark.parametrize("t_func", ["pe", "weibull"])
+def test_log_survival_preserves_finite_cumulative_hazard_after_underflow(
+    t_func, backend, survival_data,
+):
+    model = DeepPromotionTimeCure(
+        t_func=t_func, epochs=1, validation_fraction=0,
+    ).fit(*survival_data)
+    X = np.array([[8.0, 0.0]])
+    expected = -np.exp(8.0) * (-np.expm1(-1.0))
+    assert model.predict_survival(X, [1.0])[0, 0] == 0.0
+    np.testing.assert_allclose(model.predict_log_survival(X, [1.0]), [[expected]])
+    cumulative_hazard = model.predict_cumulative_hazard_function(X, return_array=True)
+    assert np.all(np.isfinite(cumulative_hazard))
+
+
+def test_small_weibull_baseline_cdf_is_combined_before_exponentiating(
+    backend, survival_data,
+):
+    model = DeepPromotionTimeCure(
+        t_func="weibull", epochs=1, validation_fraction=0,
+    ).fit(*survival_data)
+    model.baseline_parameters_ = np.array([2.0, 1.0])
+    X = np.array([[900.0, 0.0]])
+    time = 1e-200
+    expected_hazard = np.exp(900.0 + 2 * np.log(time))
+    np.testing.assert_allclose(
+        model.predict_log_survival(X, [time]), [[-expected_hazard]], rtol=1e-13,
+    )
+    assert model.predict_survival(X, [time])[0, 0] < 1.0
+
+
+def test_softplus_log_link_preserves_large_negative_predictors(backend, survival_data):
+    model = DeepPromotionTimeCure(
+        parametrization=2, epochs=1, validation_fraction=0,
+    ).fit(*survival_data)
+    np.testing.assert_array_equal(model._log_theta(np.array([-1000.0])), [-1000.0])
+
+
 def test_piecewise_rates_and_final_interval_extrapolation(backend, survival_data):
     X, y = survival_data
     model = DeepPromotionTimeCure(

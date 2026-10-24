@@ -9,6 +9,7 @@ from sklearn.model_selection import GridSearchCV, KFold
 from sksurv.util import Surv
 
 from skcure.ggkm import GGKM
+from skcure.utils.kernels import wavelet_kernel
 
 
 SKLEARN_KERNELS = [
@@ -85,6 +86,35 @@ def test_custom_named_kernels_preserve_formulas(kernel, training, feature_matric
 
     assert observed.shape == (len(X), len(Y))
     np.testing.assert_allclose(observed, expected, rtol=1e-13, atol=1e-14)
+
+
+@pytest.mark.parametrize("scale,expected", [
+    (1.0e-308, np.eye(3)),
+    (1.0e308, np.ones((3, 3))),
+])
+def test_wavelet_extreme_scale_preserves_finite_diagonal(scale, expected):
+    X = np.array([[-1.0, 2.0], [0.0, 0.0], [1.0, 3.0]])
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        actual = wavelet_kernel(X, A=scale)
+    np.testing.assert_array_equal(actual, expected)
+
+
+def test_wavelet_scales_overflowing_raw_differences_before_evaluation():
+    X = np.array([[-1.0e308], [1.0e308]])
+    expected_off_diagonal = np.exp(-2.0) * np.cos(3.5)
+    expected = np.array([[1.0, expected_off_diagonal], [expected_off_diagonal, 1.0]])
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        actual = wavelet_kernel(X, A=1.0e308)
+    np.testing.assert_allclose(actual, expected, rtol=1e-14, atol=0.0)
+
+
+def test_wavelet_tiny_scale_resolves_proportionally_tiny_differences():
+    X = np.array([[0.0, 0.0], [1.0e-308, 2.0e-308]])
+    expected_off_diagonal = np.exp(-2.5) * np.cos(1.75) * np.cos(3.5)
+    expected = np.array([[1.0, expected_off_diagonal], [expected_off_diagonal, 1.0]])
+    with np.errstate(over="raise", invalid="raise", divide="raise"):
+        actual = wavelet_kernel(X, A=1.0e-308)
+    np.testing.assert_allclose(actual, expected, rtol=1e-14, atol=0.0)
 
 
 @pytest.mark.parametrize("kernel", ["chi2", "additive_chi2"])

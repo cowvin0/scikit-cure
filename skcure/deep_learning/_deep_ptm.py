@@ -1,8 +1,10 @@
 """Scikit-cure interface to DeepCure's Deep Promotion Time Cure Model."""
 
+from math import isfinite
 from numbers import Integral, Real
 
 import numpy as np
+from scipy.special import logsumexp
 from sklearn.model_selection import train_test_split
 from sklearn.utils import check_random_state
 
@@ -95,7 +97,14 @@ class DeepPromotionTimeCure(BaseCureEstimator):
     rate beyond the last finite breakpoint, making the baseline proper and
     the limiting population survival equal to the reported cure probability.
     Every call to fit initializes a new network.
+    Training uses double precision and a local stable likelihood endpoint on
+    the upstream DeepPTM architecture. Baseline coefficients are constrained to
+    remain strictly positive.
     """
+
+    n_features_in_: int
+    baseline_parameters_: np.ndarray
+    breakpoints_: np.ndarray | None
 
     def __init__(
         self,
@@ -145,7 +154,10 @@ class DeepPromotionTimeCure(BaseCureEstimator):
         return getattr(self, "_is_fitted", False)
 
     def __getstate__(self):
-        state = super().__getstate__().copy()
+        state = super().__getstate__()
+        if not isinstance(state, dict):
+            raise TypeError("Estimator state must be a dictionary.")
+        state = state.copy()
         model = state.pop("model_", None)
         if model is not None and self.__sklearn_is_fitted__():
             # Upstream DeepPTM's Keras config cannot reconstruct its custom
@@ -165,8 +177,10 @@ class DeepPromotionTimeCure(BaseCureEstimator):
         super().__setstate__(state)
         if network is None:
             return
-        tf, DeepPTM = self._imports()
-        model = DeepPTM(
+        tf, _ = self._imports()
+        from ._loss import _StableDeepPTM
+
+        model = _StableDeepPTM(
             stack_eta=[
                 tf.keras.layers.deserialize(layer) for layer in network["layers"]
             ],
@@ -174,24 +188,28 @@ class DeepPromotionTimeCure(BaseCureEstimator):
             break_val=(
                 None
                 if self.breakpoints_ is None
-                else tf.convert_to_tensor(self.breakpoints_, dtype=tf.float32)
+                else tf.convert_to_tensor(self.breakpoints_, dtype=tf.float64)
             ),
             parametrization=self.parametrization_,
         )
         model.compile(optimizer=tf.keras.optimizers.deserialize(network["optimizer"]))
-        model({
-            "x": tf.zeros((1, self.n_features_in_), dtype=tf.float32),
-            "label_event": tf.zeros(1, dtype=tf.float32),
-            "time_event": tf.convert_to_tensor(self.unique_times_[:1], dtype=tf.float32),
-        })
+        model(
+            {
+                "x": tf.zeros((1, self.n_features_in_), dtype=tf.float64),
+                "label_event": tf.zeros(1, dtype=tf.float64),
+                "time_event": tf.convert_to_tensor(
+                    self.unique_times_[:1], dtype=tf.float64
+                ),
+            }
+        )
         model.set_weights(network["weights"])
         self.model_ = model
 
     @staticmethod
     def _imports():
         try:
-            import tensorflow as tf
-            from deepcure.models import DeepPTM
+            import tensorflow as tf  # pyright: ignore[reportMissingModuleSource]
+            from deepcure.models import DeepPTM  # pyright: ignore[reportMissingImports]
         except ImportError as exc:
             raise ImportError(
                 "DeepPromotionTimeCure requires TensorFlow and DeepCure. "
@@ -215,7 +233,7 @@ class DeepPromotionTimeCure(BaseCureEstimator):
             if (
                 not isinstance(value, Real)
                 or isinstance(value, (bool, np.bool_))
-                or not np.isfinite(value)
+                or not isfinite(value)
                 or (value <= minimum if strict else value < minimum)
             ):
                 relation = ">" if strict else ">="
@@ -283,23 +301,23 @@ class DeepPromotionTimeCure(BaseCureEstimator):
             train[0], validation[position] = validation[position], train[0]
         return train, validation
 
-    def _build_breakpoints(self, t, event, *, support_max):
+    def _build_breakpoints(self, t, event, *, support_max) -> np.ndarray | None:
         if self.t_func != "pe":
             return None
         breaks = np.quantile(t[event], np.linspace(0.0, 1.0, self.n_intervals + 1))
         breaks[0] = 0.0
-        # Store the same knots used by the upstream float32 endpoint. Casting
-        # can merge nearby quantiles, so deduplicate after converting them.
+        # The local endpoint and network use the same double-precision knots.
         with np.errstate(over="ignore"):
-            breaks = breaks.astype(np.float32)
-            breaks[-1] = np.nextafter(np.float32(support_max), np.float32(np.inf))
+            breaks[-1] = np.nextafter(float(support_max), np.inf)
         breaks = np.unique(breaks).astype(float)
         if len(breaks) < 2 or np.any(~np.isfinite(breaks)):
             raise ValueError("Training times cannot form finite baseline breakpoints.")
         return breaks
 
     def _build_model(self, breakpoints, seed):
-        tf, DeepPTM = self._imports()
+        tf, _ = self._imports()
+        from ._loss import _StableDeepPTM
+
         tf.keras.utils.set_random_seed(seed)
         if self.deterministic:
             tf.config.experimental.enable_op_determinism()
@@ -307,19 +325,20 @@ class DeepPromotionTimeCure(BaseCureEstimator):
         for index, size in enumerate(self.hidden_layers):
             layers.append(
                 tf.keras.layers.Dense(
-                    int(size), activation=self.activation, name=f"hidden_{index + 1}"
+                    int(size), activation=self.activation, name=f"hidden_{index + 1}",
+                    dtype="float64",
                 )
             )
             if self.dropout:
-                layers.append(tf.keras.layers.Dropout(self.dropout))
-        layers.append(tf.keras.layers.Dense(1, activation="linear", name="eta"))
-        model = DeepPTM(
+                layers.append(tf.keras.layers.Dropout(self.dropout, dtype="float64"))
+        layers.append(tf.keras.layers.Dense(1, activation="linear", name="eta", dtype="float64"))
+        model = _StableDeepPTM(
             stack_eta=layers,
             t_func=self.t_func,
             break_val=(
                 None
                 if breakpoints is None
-                else tf.convert_to_tensor(breakpoints, dtype=tf.float32)
+                else tf.convert_to_tensor(breakpoints, dtype=tf.float64)
             ),
             parametrization=int(self.parametrization),
         )
@@ -351,14 +370,16 @@ class DeepPromotionTimeCure(BaseCureEstimator):
         def dataset(features, times, events, *, shuffle=False):
             with np.errstate(over="ignore", under="ignore"):
                 arrays = {
-                    "x": np.asarray(features, dtype=np.float32),
-                    "time_event": np.asarray(times, dtype=np.float32),
-                    "label_event": np.asarray(events, dtype=np.float32),
+                    "x": np.asarray(features, dtype=np.float64),
+                    "time_event": np.asarray(times, dtype=np.float64),
+                    "label_event": np.asarray(events, dtype=np.float64),
                 }
             if any(np.any(~np.isfinite(array)) for array in arrays.values()):
-                raise ValueError("DeepCure inputs must be representable as float32.")
+                raise ValueError("DeepCure inputs must be representable as float64.")
             if np.any(arrays["time_event"] <= 0):
-                raise ValueError("DeepCure training times must remain positive in float32.")
+                raise ValueError(
+                    "DeepCure training times must remain positive in float64."
+                )
             result = tf.data.Dataset.from_tensor_slices(arrays)
             if shuffle:
                 result = result.shuffle(len(features), seed=self._seed_)
@@ -382,9 +403,7 @@ class DeepPromotionTimeCure(BaseCureEstimator):
                 restore_best_weights=True,
             )
             callbacks.append(stopper)
-        validation = (
-            None if validation_data is None else dataset(*validation_data)
-        )
+        validation = None if validation_data is None else dataset(*validation_data)
         result = model.fit(
             dataset(X, t, event, shuffle=True),
             validation_data=validation,
@@ -400,7 +419,7 @@ class DeepPromotionTimeCure(BaseCureEstimator):
         )
         return history, best_epoch
 
-    def fit(self, X, y):
+    def fit(self, X, y) -> "DeepPromotionTimeCure":
         """Fit numeric features and a structured boolean-event/time target.
 
         Training times must be strictly positive and include at least one
@@ -414,7 +433,9 @@ class DeepPromotionTimeCure(BaseCureEstimator):
         self._seed_ = int(check_random_state(self.random_state).randint(0, 2**31 - 1))
         train, validation = self._split_for_early_stopping(event, self._seed_)
         support_max = np.max(t)
-        breaks = self._build_breakpoints(t[train], event[train], support_max=support_max)
+        breaks = self._build_breakpoints(
+            t[train], event[train], support_max=support_max
+        )
         model = self._build_model(breaks, self._seed_)
         selection = len(validation) > 0
         history, best_epoch = self._fit_model(
@@ -422,16 +443,15 @@ class DeepPromotionTimeCure(BaseCureEstimator):
             X[train],
             t[train],
             event[train],
-            validation_data=(X[validation], t[validation], event[validation])
-            if selection
-            else None,
+            validation_data=(
+                (X[validation], t[validation], event[validation]) if selection else None
+            ),
             epochs=self.epochs,
             early_stopping=selection,
         )
         self._validate_history(history, validation=selection)
-        if (
-            not isinstance(best_epoch, Integral)
-            or not 1 <= best_epoch <= len(history["loss"])
+        if not isinstance(best_epoch, Integral) or not 1 <= best_epoch <= len(
+            history["loss"]
         ):
             raise RuntimeError("DeepCure returned an invalid selected epoch.")
         self.history_ = history
@@ -466,63 +486,87 @@ class DeepPromotionTimeCure(BaseCureEstimator):
         self._is_fitted = True
         return self
 
-    def _predict_eta_from_validated_X(self, X):
+    def _predict_eta_from_validated_X(self, X) -> np.ndarray:
         tf, _ = self._imports()
-        values = tf.convert_to_tensor(X, dtype=tf.float32)
+        values = tf.convert_to_tensor(X, dtype=tf.float64)
         for layer in self.model_.stack_eta:
             values = layer(values, training=False)
         eta = np.asarray(values, dtype=float).reshape(-1)
         if eta.shape != (len(X),) or np.any(~np.isfinite(eta)):
-            raise FloatingPointError("DeepCure returned a non-finite incidence predictor.")
+            raise FloatingPointError(
+                "DeepCure returned a non-finite incidence predictor."
+            )
         return eta
 
-    def predict(self, X):
+    def predict(self, X) -> np.ndarray:
         """Return the neural predictor; larger values indicate greater risk."""
         return self.predict_eta(X)
 
-    def predict_eta(self, X):
+    def predict_eta(self, X) -> np.ndarray:
         """Return the fitted neural incidence predictor, with dropout disabled."""
         return self._predict_eta_from_validated_X(self._validate_predict_data(X))
 
     def _log_theta(self, eta):
         if self.parametrization_ == 1:
             return eta
-        with np.errstate(divide="ignore"):
-            return np.log(np.logaddexp(0.0, eta))
+        eta = np.asarray(eta, dtype=float)
+        result = eta.copy()
+        regular = eta >= -36.0
+        result[regular] = np.log(np.logaddexp(0.0, eta[regular]))
+        return result
 
-    def predict_theta(self, X):
+    def predict_theta(self, X) -> np.ndarray:
         """Return the fitted Poisson mean number of latent event causes."""
         log_theta = self._log_theta(self.predict_eta(X))
         if np.any(log_theta > _maximum_log_float()):
             raise FloatingPointError("Predicted latent mean exceeds double precision.")
         return _safe_exp(log_theta)
 
-    def predict_cure_probability(self, X):
+    def predict_cure_probability(self, X) -> np.ndarray:
         """Return the limiting population survival probability, exp(-theta)."""
         return _exp_minus_exp(self._log_theta(self.predict_eta(X)))
 
-    def _baseline_cdf(self, times):
+    def _baseline_log_cdf(self, times: np.ndarray) -> np.ndarray:
+        """Evaluate log F0 directly, including arbitrarily small positive times."""
         with np.errstate(over="ignore", under="ignore", divide="ignore"):
             if self.t_func_ == "weibull":
                 shape, scale = self.baseline_parameters_
-                hazard = np.exp(shape * (np.log(times) - np.log(scale)))
+                log_hazard = shape * (np.log(times) - np.log(scale))
             else:
-                widths = np.diff(self.breakpoints_)
-                elapsed = np.clip(
-                    times[:, None] - self.breakpoints_[:-1], 0.0, widths
+                breakpoints = self.breakpoints_
+                if breakpoints is None:
+                    raise RuntimeError(
+                        "Piecewise-exponential baseline requires fitted breakpoints."
+                    )
+                widths = np.diff(breakpoints)
+                elapsed = np.clip(times[:, None] - breakpoints[:-1], 0.0, widths)
+                elapsed[:, -1] = np.maximum(times - breakpoints[-2], 0.0)
+                log_hazard = logsumexp(
+                    np.log(elapsed) + np.log(self.baseline_parameters_), axis=1
                 )
-                hazard = elapsed @ self.baseline_parameters_
-                hazard += (
-                    np.maximum(times - self.breakpoints_[-1], 0.0)
-                    * self.baseline_parameters_[-1]
-                )
-            return -np.expm1(-hazard)
+            regular = log_hazard >= -36.0
+            result = log_hazard.copy()
+            result[regular] = np.log(
+                -np.expm1(-np.exp(np.minimum(log_hazard[regular], 36.0)))
+            )
+            return result
 
-    def predict_survival(self, X, times):
+    def _baseline_cdf(self, times: np.ndarray) -> np.ndarray:
+        with np.errstate(under="ignore"):
+            return np.exp(self._baseline_log_cdf(times))
+
+    def predict_log_survival(self, X, times) -> np.ndarray:
+        """Evaluate log population survival without survival underflow."""
+        X = self._validate_predict_data(X)
+        times = self._validate_times(times)
+        log_theta = self._log_theta(self._predict_eta_from_validated_X(X))
+        log_cdf = self._baseline_log_cdf(times)
+        return -_safe_exp(log_theta[:, None] + log_cdf[None, :])
+
+    def predict_survival(self, X, times) -> np.ndarray:
         """Evaluate continuous population survival at finite non-negative times."""
         X = self._validate_predict_data(X)
         times = self._validate_times(times)
         log_theta = self._log_theta(self._predict_eta_from_validated_X(X))
-        with np.errstate(divide="ignore"):
-            log_cdf = np.log(self._baseline_cdf(times))
+        log_cdf = self._baseline_log_cdf(times)
         return _exp_minus_exp(log_theta[:, None] + log_cdf[None, :])

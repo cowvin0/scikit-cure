@@ -46,6 +46,32 @@ class LatencyDistribution(Protocol):
         ...
 
 
+@runtime_checkable
+class _LogCDFDistribution(Protocol):
+    def logcdf(self, t: ArrayLike) -> FloatArray: ...
+
+
+@runtime_checkable
+class _LogSurvivalDistribution(Protocol):
+    def logsf(self, t: ArrayLike) -> FloatArray: ...
+
+
+def latency_logcdf(distribution: LatencyDistribution, t: ArrayLike) -> FloatArray:
+    """Use a distribution's log-CDF, retaining support for older interfaces."""
+    if isinstance(distribution, _LogCDFDistribution):
+        return np.asarray(distribution.logcdf(t), dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.log(np.asarray(distribution.cdf(t), dtype=float))
+
+
+def latency_logsf(distribution: LatencyDistribution, t: ArrayLike) -> FloatArray:
+    """Use a distribution's log-survival without first rounding a tail to zero."""
+    if isinstance(distribution, _LogSurvivalDistribution):
+        return np.asarray(distribution.logsf(t), dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.log(np.asarray(distribution.sf(t), dtype=float))
+
+
 def validate_latency_distribution(distribution: object) -> LatencyDistribution:
     """Validate that an object implements the latency-distribution interface.
 
@@ -77,4 +103,6 @@ def validate_latency_distribution(distribution: object) -> LatencyDistribution:
 __all__ = [
     "LatencyDistribution",
     "validate_latency_distribution",
+    "latency_logcdf",
+    "latency_logsf",
 ]

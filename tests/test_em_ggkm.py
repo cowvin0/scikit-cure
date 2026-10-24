@@ -1,13 +1,9 @@
-"""GGKM regression tests frozen before extracting the EM implementation.
+"""GGKM EM coverage for kernels, latent families, refits, and fit failures.
 
-The reference records both observable estimator results and actual SciPy
-optimizer calls. Nested structure and non-floating values are compared exactly.
-Floating-point values are compared numerically so the regression suite remains
-portable across supported numerical environments.
-
-Poisson uses a slightly wider tolerance because its latency evaluation now
-delegates to the shared latency distribution, including the numerically stable
-survival-function implementation, rather than the legacy ``1 - CDF`` path.
+The historical fixture still verifies unchanged configuration, inputs, and
+initialization. Fitted numerical results are checked against independent model
+equations and gradient differences: stable tail formulas can legitimately alter
+the trajectory of the ill-conditioned latency optimization.
 """
 
 from contextlib import contextmanager
@@ -19,6 +15,8 @@ import sys
 import numpy as np
 import pytest
 from scipy.optimize import minimize as scipy_minimize
+from scipy.special import expit
+from sklearn.exceptions import NotFittedError
 from sklearn.metrics.pairwise import pairwise_kernels
 from sksurv.util import Surv
 
@@ -29,8 +27,6 @@ REFERENCE_PATH = Path(__file__).parent / "data" / "ggkm_em_reference.json"
 
 _STRICT_RTOL = 1e-12
 _STRICT_ATOL = 1e-14
-_POISSON_RTOL = 5e-3
-_POISSON_ATOL = 1e-6
 
 
 def _scaled_rbf(X, Y, scale=1.25):
@@ -82,15 +78,13 @@ def _cases():
         "early_convergence": {"tol": 1e6},
         "iteration_cap": {"max_em_iter": 1},
         "nondefault_initial_values": {"a": 1.2, "d": 0.9, "p": 1.1},
-        "poisson_default_iteration_limit": {"max_em_iter": None, "tol": 1e6},
+        "poisson_default_iteration_limit": {"tol": 1e6},
         "nb_default_iteration_limit": {
             "latent_distribution": "nb",
-            "max_em_iter": None,
             "tol": 1e6,
         },
         "binomial_default_iteration_limit": {
             "latent_distribution": "binomial",
-            "max_em_iter": None,
             "tol": 1e6,
         },
         "cold_refit": {},
@@ -239,10 +233,116 @@ def _predictions(model, X, y, X_test):
     return _serial(predictions)
 
 
+def _assert_fitted_equations(model, X, y, X_test):
+    """Check the fitted model without assuming a particular optimizer path."""
+    assert model.__sklearn_is_fitted__()
+    assert 1 <= model.n_iter_ <= model.max_em_iter
+    assert len(model.loglik_history_) == model.n_iter_
+    assert np.all(np.isfinite(model.loglik_history_))
+    assert model.final_loglik_ == model.loglik_history_[-1]
+    assert np.all(np.diff(model.loglik_history_) >= -1e-6)
+    assert np.all(np.isfinite([model.a_, model.d_, model.p_]))
+    assert np.all(np.array([model.a_, model.d_, model.p_]) > 0.0)
+    np.testing.assert_array_equal(model.unique_times_, np.unique(y["time"]))
+
+    eta = model.beta0_ + model.K_ @ model.alpha_
+    np.testing.assert_allclose(model.predict(X), eta, rtol=1e-13, atol=1e-14)
+    time = y["time"]
+    delta = y["event"].astype(float)
+    F = model._latency.cdf(time)
+    S = model._latency.sf(time)
+    log_density = model._latency.logpdf(time)
+    event_mask = delta > 0.5
+    event_sum = np.sum(eta[event_mask] + log_density[event_mask])
+    theta = np.exp(eta)
+    family = model._latent_model.name
+    if family == "poisson":
+        log_likelihood = event_sum - np.sum(theta * F)
+        conditional_count = delta + theta * S
+    elif family == "negative_binomial":
+        phi = model.phi_
+        log_likelihood = event_sum - np.sum(
+            (1.0 / phi + delta) * np.log1p(phi * theta * F)
+        )
+        conditional_count = delta + (1.0 + phi * delta) * theta * S / (
+            1.0 + phi * theta * F
+        )
+    else:
+        K = model._latent_model.K_bin
+        probability = expit(eta)
+        event_sum = np.sum(
+            np.log(K) + np.log(probability[event_mask]) + log_density[event_mask]
+        )
+        log_likelihood = event_sum + np.sum(
+            (K - delta) * np.log1p(-probability * F)
+        )
+        conditional_count = delta + (K - delta) * probability * S / (
+            1.0 - probability * F
+        )
+    penalty = 0.5 * model.lambda_reg * (model.alpha_ @ model.K_ @ model.alpha_)
+    np.testing.assert_allclose(
+        model.final_loglik_, log_likelihood - penalty, rtol=1e-11, atol=1e-11
+    )
+    np.testing.assert_allclose(
+        model._e_step(model.beta0_, model.alpha_, time, delta),
+        conditional_count,
+        rtol=1e-11,
+        atol=1e-12,
+    )
+
+    # Check both the intercept and a nontrivial kernel-coefficient direction.
+    parameters = np.r_[model.beta0_, model.alpha_]
+    value, gradient = model._predictor_value_and_grad(parameters, conditional_count)
+    assert np.isfinite(value)
+    assert np.all(np.isfinite(gradient))
+    directions = [np.r_[1.0, np.zeros(len(model.alpha_))]]
+    direction = np.random.default_rng(19).normal(size=len(parameters))
+    directions.append(direction / np.linalg.norm(direction))
+    for direction in directions:
+        step = 1e-5 * direction
+        finite_difference = (
+            model._predictor_value_and_grad(parameters + step, conditional_count)[0]
+            - model._predictor_value_and_grad(parameters - step, conditional_count)[0]
+        ) / 2e-5
+        np.testing.assert_allclose(
+            gradient @ direction, finite_difference, rtol=1e-5, atol=1e-7
+        )
+
+    times = np.array([0.0, 0.5, 1.0, 3.0, 5.5])
+    eta_test = model.predict_eta(X_test)
+    test_F = model._latency.cdf(times)[None, :]
+    if family == "poisson":
+        expected_log_survival = -np.exp(eta_test[:, None]) * test_F
+        expected_cure = np.exp(-np.exp(eta_test))
+    elif family == "negative_binomial":
+        expected_log_survival = -np.log1p(
+            model.phi_ * np.exp(eta_test[:, None]) * test_F
+        ) / model.phi_
+        expected_cure = np.exp(-np.log1p(model.phi_ * np.exp(eta_test)) / model.phi_)
+    else:
+        probability = expit(eta_test)
+        K = model._latent_model.K_bin
+        expected_log_survival = K * np.log1p(-probability[:, None] * test_F)
+        expected_cure = (1.0 - probability) ** K
+    np.testing.assert_allclose(
+        model.predict_log_survival(X_test, times), expected_log_survival,
+        rtol=1e-11, atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        model.predict_survival(X_test, times), np.exp(expected_log_survival),
+        rtol=1e-11, atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        model.predict_cure_probability(X_test), expected_cure, rtol=1e-11, atol=1e-12
+    )
+
+
 def _run_case(case, model_class, monkeypatch):
     X, y = _data()
     X_test = np.array([[0.2, -0.4], [1.1, 0.7], [-0.3, 0.2]])
-    parameters = {"gamma": 0.3, "lambda_reg": 0.1, "max_em_iter": 3}
+    parameters = {"gamma": 0.3, "lambda_reg": 0.1}
+    if not case.endswith("default_iteration_limit"):
+        parameters["max_em_iter"] = 3
     parameters.update(_cases()[case])
     if parameters.get("kernel") == "precomputed":
         X_test = pairwise_kernels(X_test, X, metric="rbf", gamma=0.3)
@@ -251,6 +351,7 @@ def _run_case(case, model_class, monkeypatch):
     runs = []
     with _record_optimizers(monkeypatch) as trace:
         model.fit(X, y)
+        _assert_fitted_equations(model, X, y, X_test)
         runs.append(
             {"state": _state(model), "predictions": _predictions(model, X, y, X_test)}
         )
@@ -265,6 +366,7 @@ def _run_case(case, model_class, monkeypatch):
             }
             model.set_params(**changes.get(case, {}))
             model.fit(X, y)
+            _assert_fitted_equations(model, X, y, X_test)
             runs.append(
                 {
                     "state": _state(model),
@@ -322,6 +424,8 @@ def _run_failure(distribution, stage, model_class, monkeypatch):
         else:
             raise AssertionError("Expected the injected failure to propagate")
     state = _state(model)
+    with pytest.raises(NotFittedError):
+        model.predict(X)
     # An instance method installed above is test instrumentation, not fit state.
     state["latent_parameters"].pop("finalize_fit", None)
     return {
@@ -373,14 +477,7 @@ def _assert_reference(
         assert actual == expected, path
 
 
-def test_initial_loglik_validation_preserves_nb_legacy_semantics():
-    model = GGKM()
-    model._latent_model = SimpleNamespace(name="negative_binomial")
-
-    assert model._validate_initial_loglik(np.nan) is None
-
-
-@pytest.mark.parametrize("name", ["poisson", "binomial"])
+@pytest.mark.parametrize("name", ["poisson", "negative_binomial", "binomial"])
 @pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])
 def test_initial_loglik_validation_requires_finite_value(name, value):
     model = GGKM()
@@ -393,24 +490,7 @@ def test_initial_loglik_validation_requires_finite_value(name, value):
         model._validate_initial_loglik(value)
 
 
-def test_gg_latency_result_validation_preserves_nb_legacy_semantics():
-    """
-    NB historically accepts an optimizer result with finite parameters even
-    when result.fun is non-finite. Preserve that behavior during extraction.
-    """
-    optimizer = _GeneralizedGammaLatencyOptimizer()
-    latent_model = SimpleNamespace(name="negative_binomial")
-    result = SimpleNamespace(
-        success=True,
-        fun=np.inf,
-        x=np.ones(3),
-        message="controlled result",
-    )
-
-    optimizer._validate_result(latent_model, result)
-
-
-@pytest.mark.parametrize("name", ["poisson", "binomial"])
+@pytest.mark.parametrize("name", ["poisson", "negative_binomial", "binomial"])
 def test_gg_latency_result_validation_requires_finite_fun(name):
     optimizer = _GeneralizedGammaLatencyOptimizer()
     latent_model = SimpleNamespace(name=name)
@@ -428,22 +508,7 @@ def test_gg_latency_result_validation_requires_finite_fun(name):
         optimizer._validate_result(latent_model, result)
 
 
-def test_gg_latency_log_parameter_validation_preserves_poisson_legacy_semantics():
-    """
-    Poisson historically skipped the post-optimizer log-parameter overflow
-    check. Preserve that behavior while relocating the validation.
-    """
-    optimizer = _GeneralizedGammaLatencyOptimizer()
-    latent_model = SimpleNamespace(name="poisson")
-    log_pars = np.full(
-        3,
-        generalized_gamma_log_overflow_value(),
-    )
-
-    optimizer._validate_log_parameters(latent_model, log_pars)
-
-
-@pytest.mark.parametrize("name", ["negative_binomial", "binomial"])
+@pytest.mark.parametrize("name", ["poisson", "negative_binomial", "binomial"])
 def test_gg_latency_log_parameter_validation_rejects_overflow(name):
     optimizer = _GeneralizedGammaLatencyOptimizer()
     latent_model = SimpleNamespace(name=name)
@@ -471,22 +536,39 @@ def em_reference():
 @pytest.mark.parametrize("case", list(_cases()))
 def test_ggkm_em_reference(case, em_reference, monkeypatch):
     observed = _run_case(case, GGKM, monkeypatch)
+    expected = em_reference["successful_fits"][case]
+    assert len(observed["runs"]) == len(expected["runs"])
+    for run, historical in zip(observed["runs"], expected["runs"]):
+        state = run["state"]
+        historical_state = historical["state"]
+        parameters = dict(historical_state["constructor_parameters"])
+        if case.endswith("default_iteration_limit"):
+            assert parameters["max_em_iter"] is None
+            parameters["max_em_iter"] = 1000
+        _assert_reference(state["constructor_parameters"], parameters)
+        for key in ("latent_configuration", "n_features_in", "unique_times"):
+            _assert_reference(state[key], historical_state[key])
+        for key in ("K", "X_train"):
+            _assert_reference(state["fit_state"][key], historical_state["fit_state"][key])
+        assert state["is_fitted"] is True
+        predictions = run["predictions"]
+        np.testing.assert_array_equal(predictions["risk"], predictions["eta"])
+        assert 0.0 <= predictions["score"] <= 1.0
+        for array_name, step_name in (
+            ("survival_array", "survival_steps"),
+            ("hazard_array", "hazard_steps"),
+        ):
+            for row, step in zip(predictions[array_name], predictions[step_name]):
+                np.testing.assert_array_equal(step["x"], state["unique_times"])
+                np.testing.assert_array_equal(step["y"], row)
+                np.testing.assert_array_equal(step["evaluated"], row)
 
-    distribution = _cases()[case].get("latent_distribution", "poisson")
-    if distribution == "poisson":
-        rtol = _POISSON_RTOL
-        atol = _POISSON_ATOL
-    else:
-        rtol = _STRICT_RTOL
-        atol = _STRICT_ATOL
-
-    _assert_reference(
-        observed,
-        em_reference["successful_fits"][case],
-        case,
-        rtol=rtol,
-        atol=atol,
-    )
+    # Initial predictor coordinates and posterior counts are unchanged by the
+    # new tail/dispersion formulas; optimizer iterates and call counts are not.
+    first = observed["optimizers"][0]
+    original_first = expected["optimizers"][0]
+    for key in ("fun", "x0", "jac", "args", "method"):
+        _assert_reference(first[key], original_first[key])
 
 
 @pytest.mark.parametrize("distribution", ["poisson", "nb", "binomial"])
@@ -507,18 +589,33 @@ def test_ggkm_em_failure_state_reference(
 ):
     observed = _run_failure(distribution, stage, GGKM, monkeypatch)
     key = distribution + ":" + stage
-
-    if distribution == "poisson":
-        rtol = _POISSON_RTOL
-        atol = _POISSON_ATOL
+    historical = em_reference["failed_refits"][key]
+    _assert_reference(observed["error"], historical["error"])
+    assert observed["initial_state"]["is_fitted"] is True
+    state = observed["state"]
+    assert state["is_fitted"] is False
+    for field in ("constructor_parameters", "latent_configuration", "n_features_in", "unique_times"):
+        _assert_reference(state[field], historical["state"][field])
+    progress = state["fit_state"]
+    for field in ("K", "X_train"):
+        _assert_reference(progress[field], historical["state"]["fit_state"][field])
+    assert np.all(np.isfinite(list(state["generalized_gamma"].values())))
+    assert np.all(np.array(list(state["generalized_gamma"].values())) > 0.0)
+    if stage == "finalize":
+        assert 1 <= progress["n_iter"] <= 2
+        assert len(progress["loglik_history"]) == progress["n_iter"]
+        assert np.all(np.isfinite(progress["loglik_history"]))
+        assert progress["final_loglik"] == progress["loglik_history"][-1]
+        assert np.isfinite(progress["beta0"])
+        assert np.all(np.isfinite(progress["alpha"]))
     else:
-        rtol = _STRICT_RTOL
-        atol = _STRICT_ATOL
-
-    _assert_reference(
-        observed,
-        em_reference["failed_refits"][key],
-        key,
-        rtol=rtol,
-        atol=atol,
-    )
+        assert progress["n_iter"] == (0 if stage == "initial_likelihood" else 1)
+        assert progress["loglik_history"] == []
+        assert progress["converged"] is False
+        assert progress["beta0"] is None
+        assert progress["alpha"] is None
+        assert progress["final_loglik"] is None
+    if stage in ("initial_likelihood", "e_step"):
+        assert observed["optimizers"] == []
+    elif stage in ("predictor", "generalized_gamma"):
+        assert observed["optimizers"][-1]["error"][0] == "ArithmeticError"

@@ -2,9 +2,16 @@ import numpy as np
 from numpy.testing import assert_allclose
 
 from skcure.utils.numerics import (
+    _exp_log_quantity,
     _maximum_log_float,
     _safe_exp,
 )
+
+
+def test_exp_log_quantity_preserves_nan_and_extreme_values():
+    actual = _exp_log_quantity(np.array([np.nan, -np.inf, np.inf, 1000.0, -1000.0]))
+    assert np.isnan(actual[0])
+    np.testing.assert_array_equal(actual[1:], [0.0, np.inf, np.inf, 0.0])
 
 
 def test_maximum_log_float_matches_numpy_float_limit():
@@ -67,6 +74,13 @@ def test_safe_exp_preserves_smallest_subnormal_at_boundary():
     actual = _safe_exp(np.array([log_min]))
 
     assert actual[0] == smallest_subnormal
+
+
+def test_safe_exp_retains_values_that_round_up_to_smallest_subnormal():
+    log_min = np.log(np.nextafter(0.0, 1.0))
+    log_x = np.array([log_min - 0.25, log_min - 0.5])
+    np.testing.assert_array_equal(_safe_exp(log_x), np.exp(log_x))
+    assert np.all(_safe_exp(log_x) > 0.0)
 
 
 def test_safe_exp_overflows_values_above_largest_float():

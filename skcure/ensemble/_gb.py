@@ -1,5 +1,6 @@
 """Gradient-boosted generalized-gamma cure models."""
 
+from math import isfinite
 from numbers import Integral, Real
 
 import numpy as np
@@ -52,8 +53,8 @@ class GradientBoostingCure(BaseCureEstimator):
         Controls randomness in the regression trees.
     tol : float, default=1e-6
         Positive absolute log-likelihood tolerance for EM convergence.
-    max_em_iter : int or None, default=1000
-        Maximum EM iterations. None also uses a limit of 1000.
+    max_em_iter : int, default=1000
+        Maximum number of EM iterations. Must be a positive integer.
     warm_start : bool, default=False
         Reuse fitted generalized gamma parameters on refit, and estimated
         dispersion when the latent configuration is unchanged. Every fit
@@ -97,7 +98,6 @@ class GradientBoostingCure(BaseCureEstimator):
     and, for negative binomial counts with ``phi=None``, dispersion fitting.
     """
 
-    _default_max_em_iter = 1000
     _latency_optimizer = _GeneralizedGammaLatencyOptimizer()
 
     def __init__(
@@ -138,21 +138,23 @@ class GradientBoostingCure(BaseCureEstimator):
         return getattr(self, "_is_fitted", False)
 
     @property
-    def phi_(self):
-        if self._latent_model.name != "negative_binomial":
+    def phi_(self) -> float | None:
+        latent_model = self._latent_model
+        if not isinstance(latent_model, _NegativeBinomialLatentModel):
             raise AttributeError(
                 "phi_ is defined only for latent_distribution='negative_binomial'."
             )
-        return self._latent_model.phi_
+        return latent_model.phi_
 
     @property
-    def estimate_phi_(self):
-        if self._latent_model.name != "negative_binomial":
+    def estimate_phi_(self) -> bool:
+        latent_model = self._latent_model
+        if not isinstance(latent_model, _NegativeBinomialLatentModel):
             raise AttributeError(
                 "estimate_phi_ is defined only for "
                 "latent_distribution='negative_binomial'."
             )
-        return self._latent_model.estimate_phi
+        return latent_model.estimate_phi
 
     def _gg_value_and_grad(
         self,
@@ -219,7 +221,7 @@ class GradientBoostingCure(BaseCureEstimator):
         if distribution == "negative_binomial":
             if self.phi is not None and (
                 not isinstance(self.phi, Real)
-                or not np.isfinite(self.phi)
+                or not isfinite(self.phi)
                 or self.phi <= 0
             ):
                 raise ValueError("phi must be positive and finite or None.")
@@ -229,7 +231,7 @@ class GradientBoostingCure(BaseCureEstimator):
     def _validate_boosting_parameters(self):
         if (
             not isinstance(self.learning_rate, Real)
-            or not np.isfinite(self.learning_rate)
+            or not isfinite(self.learning_rate)
             or not 0 < self.learning_rate <= 1
         ):
             raise ValueError("learning_rate must belong to (0, 1].")
@@ -279,22 +281,49 @@ class GradientBoostingCure(BaseCureEstimator):
         return -gradient
 
     def _line_search_step(self, eta, h, Nhat):
-        def negative_Q(rho_array):
+        initial_value, initial_gradient = self._incidence_value_and_grad(eta, Nhat)
+        if not np.isfinite(initial_value) or np.any(~np.isfinite(h)):
+            raise FloatingPointError("Non-finite boosting line-search inputs.")
+        direction_scale = float(np.max(np.abs(h)))
+        if direction_scale == 0.0:
+            return 0.0
+        direction = h / direction_scale
+        initial_slope = float(initial_gradient @ direction)
+        if not np.isfinite(initial_slope) or initial_slope >= 0.0:
+            return 0.0
+
+        # Optimize a predictor-sized displacement rather than a tree weight.
+        # This keeps the scalar search well scaled even for very large trees.
+        def negative_Q(displacement):
             with np.errstate(over="ignore", invalid="ignore"):
-                candidate = eta + rho_array[0] * h
-            return self._incidence_value_and_grad(candidate, Nhat)[0]
+                candidate = eta + displacement[0] * direction
+            value, gradient = self._incidence_value_and_grad(candidate, Nhat)
+            return value, np.array([gradient @ direction], dtype=float)
 
         result = minimize(
-            negative_Q, x0=np.array([1.0]), method="L-BFGS-B", bounds=[(0.0, 10.0)]
+            negative_Q,
+            x0=np.array([min(1.0, direction_scale)]),
+            jac=True,
+            method="L-BFGS-B",
+            bounds=[(0.0, min(direction_scale, np.finfo(float).max / 10.0) * 10.0)],
+            options={"ftol": 1e-13, "gtol": 1e-9, "maxiter": 100},
         )
-        rho = float(result.x[0])
-        if not result.success or not np.isfinite(rho) or rho <= 1e-12:
-            rho = 1.0
-        while rho > 1e-12 and not np.isfinite(negative_Q(np.array([rho]))):
+        displacement = float(result.x[0])
+        if not result.success or not np.isfinite(displacement) or displacement <= 0:
+            displacement = min(1.0, direction_scale)
+        rho = min(10.0, displacement / direction_scale)
+
+        # Check the actual shrunken update, including optimizer fallback paths.
+        # A finite objective by itself does not establish a useful step.
+        while rho > 0.0:
+            candidate = eta + (self.learning_rate * rho) * h
+            if np.array_equal(candidate, eta):
+                return 0.0
+            value, _ = self._incidence_value_and_grad(candidate, Nhat)
+            if np.isfinite(value) and value <= initial_value:
+                return rho
             rho *= 0.5
-        if rho <= 1e-12:
-            raise FloatingPointError("No finite boosting line-search step was found.")
-        return rho
+        return 0.0
 
     def _boosting_m_step(self, X, Nhat):
         eta = self.eta_train_.copy()
@@ -312,6 +341,8 @@ class GradientBoostingCure(BaseCureEstimator):
             tree.fit(X, gradient)
             h = tree.predict(X)
             rho = self._line_search_step(eta=eta, h=h, Nhat=Nhat)
+            if rho == 0.0:
+                break
             step = self.learning_rate * rho
             eta_new = eta + step * h
             if np.any(~np.isfinite(eta_new)):
@@ -333,9 +364,19 @@ class GradientBoostingCure(BaseCureEstimator):
                 result.fun,
             )
             and np.all(np.isfinite(result.x))
+            and np.all(np.isfinite(getattr(result, "jac", np.zeros(3))))
         )
 
     def _gg_m_step(self, t, delta, Nhat):
+        initial = np.array([self.a_, self.d_, self.p_])
+        initial_value, initial_gradient = self._gg_value_and_grad(initial, t, delta, Nhat)
+        if (
+            self._latency_optimizer._log_objective_is_invalid(
+                self._latent_model, initial_value
+            )
+            or not np.all(np.isfinite(initial_gradient))
+        ):
+            raise FloatingPointError("Initial generalized-gamma objective is invalid.")
         result = minimize(
             fun=self._gg_value_and_grad,
             x0=[self.a_, self.d_, self.p_],
@@ -344,7 +385,16 @@ class GradientBoostingCure(BaseCureEstimator):
             method="L-BFGS-B",
             bounds=[(1e-5, None)] * 3,
         )
-        if not self._valid_gamma_result(result) or np.any(result.x <= 0):
+        raw_valid = self._valid_gamma_result(result) and np.all(result.x > 0)
+        if raw_valid:
+            value, gradient = self._gg_value_and_grad(result.x, t, delta, Nhat)
+            raw_valid = (
+                not self._latency_optimizer._log_objective_is_invalid(
+                    self._latent_model, value
+                )
+                and np.all(np.isfinite(gradient))
+            )
+        if not raw_valid:
             result = minimize(
                 fun=self._gg_log_value_and_grad,
                 x0=np.log([self.a_, self.d_, self.p_]),
@@ -361,6 +411,16 @@ class GradientBoostingCure(BaseCureEstimator):
                 raise RuntimeError(
                     "Generalized-gamma optimization returned an invalid objective."
                 )
+            value, gradient = self._gg_log_value_and_grad(result.x, t, delta, Nhat)
+            if (
+                self._latency_optimizer._log_objective_is_invalid(
+                    self._latent_model, value
+                )
+                or not np.all(np.isfinite(gradient))
+            ):
+                raise RuntimeError(
+                    "Generalized-gamma optimization returned an invalid objective."
+                )
             self._latency_optimizer._validate_log_parameters(
                 self._latent_model,
                 result.x,
@@ -372,13 +432,27 @@ class GradientBoostingCure(BaseCureEstimator):
             raise FloatingPointError(
                 "Generalized-gamma optimization returned invalid parameters."
             )
+        # Reevaluate in natural coordinates after the log transformation too;
+        # cached optimizer success cannot justify a worsening EM update.
+        final_value, final_gradient = self._gg_value_and_grad(parameters, t, delta, Nhat)
+        if (
+            self._latency_optimizer._log_objective_is_invalid(
+                self._latent_model, final_value
+            )
+            or not np.all(np.isfinite(final_gradient))
+        ):
+            raise RuntimeError("Generalized-gamma optimization returned an invalid objective.")
+        tolerance = 64.0 * np.finfo(float).eps * (1.0 + abs(initial_value))
+        if final_value > initial_value + tolerance:
+            return
         self._set_latency_parameters(*map(float, parameters))
 
-    def _phi_m_step(self, t, delta):
-        if self._latent_model.name != "negative_binomial":
+    def _phi_m_step(self, t, delta) -> None:
+        latent_model = self._latent_model
+        if not isinstance(latent_model, _NegativeBinomialLatentModel):
             return
 
-        self._latent_model.update_after_latency_from_eta(
+        latent_model.update_after_latency_from_eta(
             self._latency,
             self.eta_train_,
             t,
@@ -403,9 +477,7 @@ class GradientBoostingCure(BaseCureEstimator):
         """
         was_fitted = self.__sklearn_is_fitted__()
         self._is_fitted = False
-        self._max_em_iter = self._validate_em_parameters(
-            default_max_em_iter=self._default_max_em_iter
-        )
+        self._validate_em_parameters()
         self._validate_boosting_parameters()
         latent_model = self._make_latent_model()
         X, event, t = self._validate_fit_data(X, y)
@@ -433,7 +505,7 @@ class GradientBoostingCure(BaseCureEstimator):
         ll_old = self._loglikelihood(t, delta)
         if not np.isfinite(ll_old):
             raise FloatingPointError("Initial boosting log-likelihood is non-finite.")
-        for iteration in range(self._max_em_iter):
+        for iteration in range(self.max_em_iter):
             self.n_iter_ = iteration + 1
             Nhat = self._e_step(t, delta)
             self._boosting_m_step(X=X, Nhat=Nhat)
@@ -447,7 +519,7 @@ class GradientBoostingCure(BaseCureEstimator):
                 self.converged_ = True
                 break
             ll_old = ll_new
-        self.final_loglik_ = float(ll_new)
+        self.final_loglik_ = self.loglik_history_[-1]
         self.n_estimators_ = len(self.models_)
         self._latent_model.finalize_fit()
         self.unique_times_ = np.unique(t)
@@ -490,6 +562,14 @@ class GradientBoostingCure(BaseCureEstimator):
             self._latency,
             eta,
             times,
+        )
+
+    def predict_log_survival(self, X, times) -> np.ndarray:
+        """Evaluate log survival without first rounding survival probabilities."""
+        eta = self.predict_eta(X)
+        times = self._validate_times(times)
+        return self._latent_model.predict_log_survival_from_eta(
+            self._latency, eta, times
         )
 
     def predict_cure_probability(self, X):

@@ -1,11 +1,15 @@
 """Shared interface for scikit-survival compatible cure estimators."""
 
 from abc import ABC, abstractmethod
+from math import isfinite
 from numbers import Integral, Real
 
 import numpy as np
 from sklearn.base import BaseEstimator
-from sklearn.utils.validation import check_is_fitted, validate_data
+from sklearn.utils.validation import (
+    check_is_fitted,
+    validate_data,  # pyright: ignore[reportAttributeAccessIssue]
+)
 from sksurv.base import SurvivalAnalysisMixin
 from sksurv.functions import StepFunction
 from sksurv.util import check_array_survival
@@ -21,55 +25,53 @@ class BaseCureEstimator(SurvivalAnalysisMixin, BaseEstimator, ABC):
     validation.
     """
 
+    unique_times_: np.ndarray
+    max_em_iter: int
+
     @abstractmethod
-    def fit(self, X, y):
+    def fit(self, X, y) -> "BaseCureEstimator":
         """Fit to features and a structured boolean-event/observed-time target."""
 
     @abstractmethod
-    def predict(self, X):
+    def predict(self, X) -> np.ndarray:
         """Return one risk score per sample, with larger values meaning more risk."""
 
     @abstractmethod
-    def predict_survival(self, X, times):
+    def predict_survival(self, X, times) -> np.ndarray:
         """Return continuous survival probabilities at the requested times."""
 
     @abstractmethod
-    def predict_cure_probability(self, X):
+    def predict_cure_probability(self, X) -> np.ndarray:
         """Return each sample's limiting survival probability."""
 
-    def _validate_fit_data(self, X, y):
-        X = validate_data(self, X, dtype=np.float64, ensure_min_samples=2)
+    def _validate_fit_data(self, X, y) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        X = np.asarray(validate_data(self, X, dtype=np.float64, ensure_min_samples=2))
         event, time = check_array_survival(X, y, allow_time_zero=False)
         return X, event, time
 
-    def _validate_em_parameters(
-        self, *, nonnegative=(), booleans=(), default_max_em_iter=1000
-    ):
-        """Validate common EM settings and return the resolved iteration limit."""
+    def _validate_em_parameters(self, *, nonnegative=(), booleans=()):
+        """Validate common EM settings."""
         for name in ("a", "d", "p", "tol"):
             value = getattr(self, name)
-            if not isinstance(value, Real) or not np.isfinite(value) or value <= 0:
+            if not isinstance(value, Real) or not isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be positive and finite.")
         for name in nonnegative:
             value = getattr(self, name)
-            if not isinstance(value, Real) or not np.isfinite(value) or value < 0:
+            if not isinstance(value, Real) or not isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be non-negative and finite.")
         for name in ("warm_start", *booleans):
             if not isinstance(getattr(self, name), (bool, np.bool_)):
                 raise TypeError(f"{name} must be a boolean.")
-        if self.max_em_iter is not None and (
+        if (
             not isinstance(self.max_em_iter, Integral)
             or isinstance(self.max_em_iter, (bool, np.bool_))
             or self.max_em_iter < 1
         ):
-            raise ValueError("max_em_iter must be a positive integer or None.")
-        return (
-            default_max_em_iter if self.max_em_iter is None else int(self.max_em_iter)
-        )
+            raise ValueError("max_em_iter must be a positive integer.")
 
-    def _validate_predict_data(self, X):
+    def _validate_predict_data(self, X) -> np.ndarray:
         check_is_fitted(self)
-        return validate_data(self, X, reset=False, dtype=np.float64)
+        return np.asarray(validate_data(self, X, reset=False, dtype=np.float64))
 
     @staticmethod
     def _validate_times(times):
@@ -89,6 +91,16 @@ class BaseCureEstimator(SurvivalAnalysisMixin, BaseEstimator, ABC):
         for i, row in enumerate(values):
             functions[i] = StepFunction(self.unique_times_, row)
         return functions
+
+    def predict_log_survival(self, X, times) -> np.ndarray:
+        """Return log survival probabilities at finite non-negative times.
+
+        Estimators override this method to evaluate log survival directly,
+        preserving finite cumulative hazards when survival underflows to zero.
+        The default supports third-party estimators implementing only survival.
+        """
+        with np.errstate(divide="ignore"):
+            return np.log(self.predict_survival(X, times))
 
     def predict_survival_function(self, X, return_array=False):
         """Predict survival functions on ``unique_times_``.
@@ -120,18 +132,25 @@ class BaseCureEstimator(SurvivalAnalysisMixin, BaseEstimator, ABC):
         """Predict cumulative hazards, ``-log(S(t | X))``, on ``unique_times_``.
 
         Parameters and return formats match ``predict_survival_function``.
-        A cure fraction implies a finite limiting cumulative hazard. Numerical
-        survival probabilities of zero correspond to infinite cumulative hazard.
+        Values are evaluated from log survival so a finite cumulative hazard
+        remains available when the survival probability underflows to zero.
         """
         check_is_fitted(self, "unique_times_")
-        survival = self.predict_survival(X, self.unique_times_)
-        with np.errstate(divide="ignore"):
-            values = -np.log(survival)
+        values = -self.predict_log_survival(X, self.unique_times_)
         return self._format_prediction_functions(values, return_array)
 
 
 class _BaseParametricCureEstimator(BaseCureEstimator):
     """Common EM lifecycle for parametric cure estimators."""
+
+    a: float
+    d: float
+    p: float
+    warm_start: bool
+
+    @abstractmethod
+    def predict_eta(self, X) -> np.ndarray:
+        """Return the fitted incidence predictor for each sample."""
 
     def __sklearn_is_fitted__(self):
         return getattr(self, "_is_fitted", False)
@@ -142,29 +161,24 @@ class _BaseParametricCureEstimator(BaseCureEstimator):
         self.d_ = float(d)
         self.p_ = float(p)
 
-    def predict(self, X):
+    def predict(self, X) -> np.ndarray:
         """Return the linear predictor, with larger values indicating more risk."""
         return self.predict_eta(X)
 
-    def _prepare_fit(
-        self, X, y, *, nonnegative=(), booleans=(), default_max_em_iter=1000
-    ):
+    def _prepare_fit(self, X, y, *, nonnegative=(), booleans=()):
         """Validate inputs, initialize learned parameters, and reset fit history."""
         was_fitted = self.__sklearn_is_fitted__()
         self._is_fitted = False
-        self._max_em_iter = self._validate_em_parameters(
+        self._validate_em_parameters(
             nonnegative=nonnegative,
             booleans=booleans,
-            default_max_em_iter=default_max_em_iter,
         )
+        has_phi = hasattr(self, "phi")
+        phi = getattr(self, "phi", None)
         if (
-            hasattr(self, "phi")
-            and self.phi is not None
-            and (
-                not isinstance(self.phi, Real)
-                or not np.isfinite(self.phi)
-                or self.phi <= 0
-            )
+            has_phi
+            and phi is not None
+            and (not isinstance(phi, Real) or not isfinite(phi) or phi <= 0)
         ):
             raise ValueError("phi must be positive and finite or None.")
         X, event, time = self._validate_fit_data(X, y)
@@ -175,11 +189,11 @@ class _BaseParametricCureEstimator(BaseCureEstimator):
                 self.d,
                 self.p,
             )
-        if hasattr(self, "phi"):
-            if not reuse or self.phi != self._phi_parameter:
-                self.phi_ = 0.5 if self.phi is None else float(self.phi)
-            self.estimate_phi_ = self.phi is None
-            self._phi_parameter = self.phi
+        if has_phi:
+            if not reuse or phi != self._phi_parameter:
+                self.phi_ = 0.5 if phi is None else float(phi)
+            self.estimate_phi_ = phi is None
+            self._phi_parameter = phi
         self.loglik_history_ = []
         self.converged_ = False
         self.n_iter_ = 0

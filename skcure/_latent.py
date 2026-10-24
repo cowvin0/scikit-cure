@@ -7,7 +7,61 @@ import numpy as np
 from scipy.special import expit
 from scipy.optimize import minimize
 
+from skcure.distributions.base import latency_logcdf, latency_logsf
 from skcure.utils.numerics import _maximum_log_float, _exp_log_quantity, _exp_minus_exp
+
+
+def _nb_population_terms(log_A, phi):
+    """Return log(1 + phi*A) and log(1 + phi*A)/phi from log(A).
+
+    Factoring the second quantity as A * log1p(x)/x avoids both an
+    overflowing reciprocal of phi and loss of the Poisson limit when x
+    underflows. The ratio is evaluated by its series near zero.
+    """
+    log_A = np.asarray(log_A, dtype=float)
+    log_x = np.log(phi) + log_A
+    log_component = np.logaddexp(0.0, log_x)
+    log_scaled_component = np.empty_like(log_x)
+    small = log_x < -8.0
+    x = np.exp(log_x[small])
+    correction = x * (-0.5 + x * (1.0 / 3.0 + x * (-0.25 + x / 5.0)))
+    log_scaled_component[small] = log_A[small] + np.log1p(correction)
+    regular = ~small
+    log_scaled_component[regular] = np.log(log_component[regular]) - np.log(phi)
+    scaled_component = _exp_log_quantity(log_scaled_component)
+    return log_component, scaled_component
+
+
+def _nb_log_scaled_mean(log_A, phi):
+    """Return log(A / (1 + phi*A)) without subtracting large predictors."""
+    log_A = np.asarray(log_A, dtype=float)
+    log_phi = np.log(phi)
+    log_x = log_phi + log_A
+    result = np.empty_like(log_A)
+    large = log_x > 0.0
+    result[large] = -log_phi - np.logaddexp(0.0, -log_x[large])
+    result[~large] = log_A[~large] - np.logaddexp(0.0, log_x[~large])
+    return result
+
+
+def _nb_phi_derivative(log_A, phi, delta):
+    """Derivative of the NB observed log-likelihood with respect to phi."""
+    log_A = np.asarray(log_A, dtype=float)
+    log_x = np.log(phi) + log_A
+    log_first = np.empty_like(log_x)
+    small = log_x < np.log(0.01)
+    x = np.exp(log_x[small])
+    # (log1p(x) - x/(1+x))/x**2 = 1/2 - 2*x/3 + 3*x**2/4 - ...
+    coefficients = [(-1.0) ** k * (k + 1.0) / (k + 2.0) for k in range(9)]
+    log_first[small] = 2.0 * log_A[small] + np.log(
+        np.polynomial.polynomial.polyval(x, coefficients)
+    )
+    regular = ~small
+    numerator = np.logaddexp(0.0, log_x[regular]) - expit(log_x[regular])
+    log_first[regular] = np.log(numerator) - 2.0 * np.log(phi)
+    first = _exp_log_quantity(log_first)
+    second = _exp_log_quantity(_nb_log_scaled_mean(log_A, phi))
+    return first - delta * second
 
 
 def _normalize_latent_distribution(value):
@@ -107,6 +161,15 @@ class _LatentCountModel(ABC):
         )
 
     @abstractmethod
+    def predict_log_survival_from_eta(
+        self,
+        latency,
+        eta: np.ndarray,
+        t_grid: np.ndarray,
+    ) -> np.ndarray:
+        """Evaluate log population survival without probability underflow."""
+
+    @abstractmethod
     def predict_survival_from_eta(
         self,
         latency,
@@ -132,31 +195,18 @@ class _PoissonLatentModel(_LatentCountModel):
 
     @staticmethod
     def _cumulative_intensity_is_invalid(cumulative):
-        return np.any(np.isinf(cumulative))
+        return np.any(~np.isfinite(cumulative))
 
     @staticmethod
     def _poisson_predictor_is_invalid(f, max_log):
         return np.any(f > max_log)
 
     def _observed_loglikelihood(self, latency, f, t, delta, cumulative):
-        return np.sum(delta * (f + latency.logpdf(t)) - cumulative)
-
-    def log_nonnegative(self, x):
-        x = np.asarray(
-            x,
-            dtype=float,
-        )
-
-        result = np.full_like(
-            x,
-            -np.inf,
-            dtype=float,
-        )
-
-        positive = x > 0.0
-        result[positive] = np.log(x[positive])
-
-        return result
+        event_mask = delta > 0.5
+        event_term = 0.0
+        if np.any(event_mask):
+            event_term = np.sum(f[event_mask] + latency.logpdf(t[event_mask]))
+        return event_term - np.sum(cumulative)
 
     def incidence_value_and_grad(self, eta, Nhat):
         eta = np.asarray(eta, dtype=float)
@@ -204,8 +254,9 @@ class _PoissonLatentModel(_LatentCountModel):
         if np.any(~np.isfinite(eta)):
             return -np.inf
 
-        latency_cdf = latency.cdf(t)
-        log_latency_cdf = self.log_nonnegative(latency_cdf)
+        log_latency_cdf = latency_logcdf(latency, t)
+        if np.any(np.isnan(log_latency_cdf)) or np.any(log_latency_cdf > 0.0):
+            return -np.inf
 
         theta_latency_cdf = _exp_log_quantity(eta + log_latency_cdf)
 
@@ -231,8 +282,9 @@ class _PoissonLatentModel(_LatentCountModel):
         if np.any(~np.isfinite(eta)):
             raise FloatingPointError(self._e_step_predictor_error)
 
-        latency_sf = latency.sf(t)
-        log_latency_sf = self.log_nonnegative(latency_sf)
+        log_latency_sf = latency_logsf(latency, t)
+        if np.any(np.isnan(log_latency_sf)) or np.any(log_latency_sf > 0.0):
+            raise FloatingPointError("Invalid Poisson latency survival probability.")
         expected_remaining = _exp_log_quantity(eta + log_latency_sf)
 
         if np.any(~np.isfinite(expected_remaining)):
@@ -255,18 +307,23 @@ class _PoissonLatentModel(_LatentCountModel):
 
         return np.exp(eta)
 
-    def predict_survival_from_eta(self, latency, eta, t_grid):
+    def predict_log_survival_from_eta(self, latency, eta, t_grid):
         eta = np.asarray(eta, dtype=float)
 
         if np.any(~np.isfinite(eta)):
             raise FloatingPointError("Non-finite Poisson predictor.")
 
-        latency_cdf = latency.cdf(t_grid)
-        log_latency_cdf = self.log_nonnegative(latency_cdf)
+        log_latency_cdf = latency_logcdf(latency, t_grid)
+        if np.any(np.isnan(log_latency_cdf)) or np.any(log_latency_cdf > 0.0):
+            raise FloatingPointError("Invalid Poisson latency cumulative probability.")
 
         log_theta_F = eta[:, None] + log_latency_cdf[None, :]
 
-        return _exp_minus_exp(log_theta_F)
+        return -_exp_log_quantity(log_theta_F)
+
+    def predict_survival_from_eta(self, latency, eta, t_grid):
+        with np.errstate(under="ignore"):
+            return np.exp(self.predict_log_survival_from_eta(latency, eta, t_grid))
 
     def predict_cure_probability_from_eta(self, latency, eta):
         eta = np.asarray(eta, dtype=float)
@@ -296,16 +353,21 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
 
     def incidence_value_and_grad(self, eta, Nhat):
         eta = np.asarray(eta, dtype=float)
-        phi = self.phi
-        log1p_phi_theta = np.logaddexp(
-            0.0,
-            np.log(phi) + eta,
+        if np.any(~np.isfinite(eta)):
+            return np.inf, np.zeros_like(eta)
+
+        log_component, scaled_component = _nb_population_terms(eta, self.phi)
+        log_x = np.log(self.phi) + eta
+        centered_eta = eta - log_component
+        large = log_x > 0.0
+        centered_eta[large] = -np.log(self.phi) - np.logaddexp(0.0, -log_x[large])
+        Q = np.sum(Nhat * centered_eta - scaled_component)
+        score = Nhat * expit(-log_x) - _exp_log_quantity(
+            _nb_log_scaled_mean(eta, self.phi)
         )
 
-        Q = np.sum(Nhat * eta - (Nhat + 1.0 / phi) * log1p_phi_theta)
-
-        fraction = expit(np.log(phi) + eta)
-        score = Nhat - (Nhat + 1.0 / phi) * fraction
+        if not np.isfinite(Q) or np.any(~np.isfinite(score)):
+            return np.inf, np.zeros_like(eta)
 
         return (
             -Q,
@@ -315,49 +377,59 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
     def observed_loglikelihood_from_eta(self, latency, eta, t, delta):
         eta = np.asarray(eta, dtype=float)
 
-        latency_cdf = latency.cdf(t)
-        log_latency_cdf = self.log_nonnegative(latency_cdf)
+        if np.any(~np.isfinite(eta)):
+            return -np.inf
 
-        phi = self.phi
-
-        log_population_term = np.logaddexp(
-            0.0,
-            np.log(phi) + eta + log_latency_cdf,
+        log_latency_cdf = latency_logcdf(latency, t)
+        if np.any(np.isnan(log_latency_cdf)) or np.any(log_latency_cdf > 0.0):
+            return -np.inf
+        log_population_term, scaled_population_term = _nb_population_terms(
+            eta + log_latency_cdf, self.phi
         )
-
-        latency_logpdf = latency.logpdf(t)
 
         event_mask = delta > 0.5
         event_term = 0.0
 
         if np.any(event_mask):
-            event_values = eta[event_mask] + latency_logpdf[event_mask]
+            event_values = eta[event_mask] + latency.logpdf(t[event_mask])
 
             if np.any(~np.isfinite(event_values)):
                 return -np.inf
 
             event_term = np.sum(event_values)
 
-        ll = event_term - np.sum((1.0 / phi + delta) * log_population_term)
+        ll = event_term - np.sum(scaled_population_term + delta * log_population_term)
 
-        return ll
+        return float(ll) if np.isfinite(ll) else -np.inf
 
     def e_step_from_eta(self, latency, eta, t, delta):
         eta = np.asarray(eta, dtype=float)
 
-        latency_cdf = latency.cdf(t)
-        latency_sf = latency.sf(t)
+        if np.any(~np.isfinite(eta)):
+            raise FloatingPointError("Non-finite negative-binomial predictor.")
 
-        log_latency_cdf = self.log_nonnegative(latency_cdf)
-        log_latency_sf = self.log_nonnegative(latency_sf)
+        log_latency_cdf = latency_logcdf(latency, t)
+        log_latency_sf = latency_logsf(latency, t)
+        if (
+            np.any(np.isnan(log_latency_cdf))
+            or np.any(log_latency_cdf > 0.0)
+            or np.any(np.isnan(log_latency_sf))
+            or np.any(log_latency_sf > 0.0)
+        ):
+            raise FloatingPointError("Invalid negative-binomial latency probability.")
 
         phi = self.phi
 
-        log_denominator = np.logaddexp(
-            0.0,
-            np.log(phi) + eta + log_latency_cdf,
-        )
+        log_phi_A = np.log(phi) + eta + log_latency_cdf
+        log_denominator = np.logaddexp(0.0, log_phi_A)
         log_ratio = eta + log_latency_sf - log_denominator
+        large = log_phi_A > 0.0
+        log_ratio[large] = (
+            -np.log(phi)
+            - log_latency_cdf[large]
+            + log_latency_sf[large]
+            - np.logaddexp(0.0, -log_phi_A[large])
+        )
         log1p_phi_delta = np.zeros_like(
             delta,
             dtype=float,
@@ -390,9 +462,10 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
     @staticmethod
     def _phi_invalid_value_and_grad():
         return (
-            1.0e100,
-            np.zeros(
+            np.inf,
+            np.full(
                 1,
+                np.nan,
                 dtype=float,
             ),
         )
@@ -415,22 +488,9 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
                 ),
             )
 
-        log_phi = np.log(phi)
-        log_phi_A = log_phi + log_A
-
-        log1p_phi_A = np.logaddexp(
-            0.0,
-            log_phi_A,
-        )
-
-        fraction = expit(log_phi_A)
-        inv_phi = 1.0 / phi
-
-        ll = np.sum(const - (inv_phi + delta) * log1p_phi_A)
-        A_over_denominator = fraction * inv_phi
-        grad = np.sum(
-            log1p_phi_A * inv_phi * inv_phi - (inv_phi + delta) * A_over_denominator
-        )
+        log1p_phi_A, scaled_component = _nb_population_terms(log_A, phi)
+        ll = np.sum(const - scaled_component - delta * log1p_phi_A)
+        grad = np.sum(_nb_phi_derivative(log_A, phi, delta))
 
         if not np.isfinite(ll) or not np.isfinite(grad):
             return (
@@ -524,9 +584,7 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
             dtype=float,
         )
 
-        latency_cdf = latency.cdf(t)
-
-        log_latency_cdf = self.log_nonnegative(latency_cdf)
+        log_latency_cdf = latency_logcdf(latency, t)
         log_A = eta + log_latency_cdf
 
         latency_logpdf = latency.logpdf(t)
@@ -578,7 +636,12 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
             ],
         )
 
-        if not result_phi.success or not np.all(np.isfinite(result_phi.x)):
+        if (
+            not result_phi.success
+            or not np.isfinite(result_phi.fun)
+            or np.shape(result_phi.x) != (1,)
+            or not np.all(np.isfinite(result_phi.x))
+        ):
             raise RuntimeError(
                 "Negative-binomial "
                 "log-dispersion "
@@ -605,6 +668,14 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
                 "log-dispersion "
                 "transformation returned "
                 "an invalid phi."
+            )
+
+        value, gradient = self.phi_value_and_grad(
+            np.array([phi_new]), const, log_A, delta
+        )
+        if not np.isfinite(value) or np.any(~np.isfinite(gradient)):
+            raise FloatingPointError(
+                "Dispersion optimization returned an invalid objective."
             )
 
         self.phi = phi_new
@@ -651,20 +722,22 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
         if (
             result_phi.success
             and np.isfinite(result_phi.fun)
+            and np.shape(result_phi.x) == (1,)
             and np.all(np.isfinite(result_phi.x))
             and result_phi.x[0] > 0.0
         ):
-            self.phi = float(result_phi.x[0])
+            phi_new = float(result_phi.x[0])
         else:
             self._update_dispersion_in_log_space(
                 const,
                 log_A,
                 delta,
             )
+            phi_new = self.phi
 
         value, gradient = self.phi_value_and_grad(
             np.array(
-                [self.phi],
+                [phi_new],
                 dtype=float,
             ),
             const,
@@ -676,6 +749,8 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
             raise FloatingPointError(
                 "Dispersion optimization returned an invalid objective."
             )
+
+        self.phi = phi_new
 
     def update_after_latency_in_log_space_from_eta(
         self,
@@ -708,28 +783,33 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
         self.phi = self._initial_phi
         self.phi_ = None
 
-    def predict_survival_from_eta(self, latency, eta, t_grid):
+    def predict_log_survival_from_eta(self, latency, eta, t_grid):
         eta = np.asarray(eta, dtype=float)
-        latency_cdf = latency.cdf(t_grid)
+        if np.any(~np.isfinite(eta)):
+            raise FloatingPointError("Non-finite negative-binomial predictor.")
 
-        log_latency_cdf = self.log_nonnegative(latency_cdf)
-        log_component = np.logaddexp(
-            0.0,
-            np.log(self.phi) + eta[:, None] + log_latency_cdf[None, :],
+        log_latency_cdf = latency_logcdf(latency, t_grid)
+        if np.any(np.isnan(log_latency_cdf)) or np.any(log_latency_cdf > 0.0):
+            raise FloatingPointError(
+                "Invalid negative-binomial latency cumulative probability."
+            )
+        _, scaled_component = _nb_population_terms(
+            eta[:, None] + log_latency_cdf[None, :], self.phi
         )
-        log_survival = -log_component / self.phi
+        return -scaled_component
 
-        return np.exp(log_survival)
+    def predict_survival_from_eta(self, latency, eta, t_grid):
+        with np.errstate(under="ignore"):
+            return np.exp(self.predict_log_survival_from_eta(latency, eta, t_grid))
 
     def predict_cure_probability_from_eta(self, latency, eta):
         eta = np.asarray(eta, dtype=float)
-        log_component = np.logaddexp(
-            0.0,
-            np.log(self.phi) + eta,
-        )
-        log_cure = -log_component / self.phi
+        if np.any(~np.isfinite(eta)):
+            raise FloatingPointError("Non-finite negative-binomial predictor.")
 
-        return np.exp(log_cure)
+        _, scaled_component = _nb_population_terms(eta, self.phi)
+        with np.errstate(under="ignore"):
+            return np.exp(-scaled_component)
 
 
 @dataclass
@@ -831,16 +911,22 @@ class _BinomialLatentModel(_LatentCountModel):
     def _log_survival_component(
         self,
         f,
-        latency_sf,
+        log_latency_sf,
     ):
-        log_theta = self._log_theta_star(f)
-        log_one_minus_theta = self._log_one_minus_theta_star(f)
-        log_latency_sf = self.log_nonnegative(latency_sf)
-
-        return np.logaddexp(
-            log_one_minus_theta,
-            log_theta + log_latency_sf,
+        f, log_latency_sf = np.broadcast_arrays(f, log_latency_sf)
+        result = np.empty_like(f, dtype=float)
+        near_origin = log_latency_sf >= -np.log(2.0)
+        # log(1 - p*F) preserves the exact S(0)=1 boundary and avoids
+        # cancellation of normalized log probabilities when F is small.
+        result[near_origin] = np.log1p(
+            expit(f[near_origin]) * np.expm1(log_latency_sf[near_origin])
         )
+        tail = ~near_origin
+        result[tail] = np.logaddexp(
+            self._log_one_minus_theta_star(f[tail]),
+            self._log_theta_star(f[tail]) + log_latency_sf[tail],
+        )
+        return result
 
     def _observed_loglikelihood(
         self,
@@ -871,18 +957,18 @@ class _BinomialLatentModel(_LatentCountModel):
     def observed_loglikelihood_from_eta(self, latency, eta, t, delta):
         eta = np.asarray(eta, dtype=float)
 
-        if self._likelihood_predictor_is_invalid(eta):
+        if np.any(~np.isfinite(eta)) or self._likelihood_predictor_is_invalid(eta):
             return -np.inf
 
-        latency_sf = latency.sf(t)
+        log_latency_sf = latency_logsf(latency, t)
 
-        if self._likelihood_survival_is_invalid(latency_sf):
+        if np.any(np.isnan(log_latency_sf)) or np.any(log_latency_sf > 0.0):
             return -np.inf
 
         log_theta = self._log_theta_star(eta)
         log_survival_component = self._log_survival_component(
             eta,
-            latency_sf,
+            log_latency_sf,
         )
 
         if self._likelihood_component_is_invalid(log_survival_component):
@@ -908,21 +994,13 @@ class _BinomialLatentModel(_LatentCountModel):
         if np.any(~np.isfinite(eta)):
             raise FloatingPointError(self._e_step_predictor_error)
 
-        latency_sf = latency.sf(t)
+        log_latency_sf = latency_logsf(latency, t)
+        if np.any(np.isnan(log_latency_sf)) or np.any(log_latency_sf > 0.0):
+            raise FloatingPointError("Non-finite latency survival probability.")
 
-        self._validate_e_step_survival(latency_sf)
-
-        log_theta = self._log_theta_star(eta)
-        log_one_minus_theta = self._log_one_minus_theta_star(eta)
-        log_latency_sf = self.log_nonnegative(latency_sf)
-        log_numerator = log_theta + log_latency_sf
-        log_denominator = np.logaddexp(
-            log_one_minus_theta,
-            log_numerator,
-        )
-        log_fraction = log_numerator - log_denominator
-
-        frac = self._conditional_fraction(log_fraction)
+        # Conditional odds are exp(eta) * S(t). This avoids normalizing
+        # already-rounded probabilities and retains e.g. sigmoid(750-750).
+        frac = expit(eta + log_latency_sf)
         self._validate_conditional_fraction(frac)
 
         Nhat = delta + (self.K_bin - delta) * frac
@@ -942,17 +1020,23 @@ class _BinomialLatentModel(_LatentCountModel):
 
         return float(np.log(theta0) - np.log1p(-theta0))
 
-    def predict_survival_from_eta(self, latency, eta, t_grid):
+    def predict_log_survival_from_eta(self, latency, eta, t_grid):
         eta = np.asarray(eta, dtype=float)
 
         if np.any(~np.isfinite(eta)):
             raise FloatingPointError("Non-finite binomial predictor.")
 
-        return self._survival_from_eta(
-            latency,
-            eta,
-            t_grid,
+        log_latency_sf = latency_logsf(latency, t_grid)
+        if np.any(np.isnan(log_latency_sf)) or np.any(log_latency_sf > 0.0):
+            raise FloatingPointError("Non-finite latency survival probability.")
+
+        return self.K_bin * self._log_survival_component(
+            eta[:, None], log_latency_sf[None, :]
         )
+
+    def predict_survival_from_eta(self, latency, eta, t_grid):
+        with np.errstate(under="ignore"):
+            return np.exp(self.predict_log_survival_from_eta(latency, eta, t_grid))
 
     def predict_cure_probability_from_eta(self, latency, eta):
         eta = np.asarray(eta, dtype=float)
@@ -964,28 +1048,6 @@ class _BinomialLatentModel(_LatentCountModel):
             latency,
             eta,
         )
-
-    def _survival_from_eta(self, latency, f, t_grid):
-        log_theta = self._log_theta_star(f)
-
-        log_one_minus_theta = self._log_one_minus_theta_star(f)
-        latency_sf = latency.sf(t_grid)
-
-        if np.any(~np.isfinite(latency_sf)):
-            raise FloatingPointError("Non-finite latency survival probability.")
-
-        log_latency_sf = self.log_nonnegative(latency_sf)
-        log_population_component = np.logaddexp(
-            log_one_minus_theta[:, None],
-            (log_theta[:, None] + log_latency_sf[None, :]),
-        )
-
-        log_survival = self.K_bin * log_population_component
-
-        with np.errstate(
-            under="ignore",
-        ):
-            return np.exp(log_survival)
 
     def _cure_from_eta(self, latency, f):
         log_one_minus_theta = self._log_one_minus_theta_star(f)

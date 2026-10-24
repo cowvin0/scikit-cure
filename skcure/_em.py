@@ -20,9 +20,28 @@ _Expected = TypeVar("_Expected")
 class _EMState(Protocol):
     """Mutable progress initialized by an estimator before each fit."""
 
-    n_iter: int
-    converged: bool
-    loglik_history: list[float]
+    @property
+    def n_iter(self) -> int: ...
+
+    @n_iter.setter
+    def n_iter(self, value: int) -> None: ...
+
+    @property
+    def converged(self) -> bool: ...
+
+    @converged.setter
+    def converged(self, value: bool) -> None: ...
+
+    @property
+    def loglik_history(self) -> list[float]: ...
+
+
+class _EstimatorProgress(Protocol):
+    """Fitted progress attributes exposed by the estimator state adapter."""
+
+    n_iter_: int
+    converged_: bool
+    loglik_history_: list[float]
 
 
 def run_em(
@@ -138,7 +157,7 @@ class _GGKMSteps(_GeneralizedGammaEMSteps):
         return parameters
 
 
-def fit_ggkm_em(model, t, delta, *, max_em_iter):
+def fit_ggkm_em(model, t, delta):
     """Fit GGKM after validation and kernel setup, preserving its EM updates."""
     n = len(t)
     alpha = np.zeros(n, dtype=float)
@@ -156,7 +175,7 @@ def fit_ggkm_em(model, t, delta, *, max_em_iter):
         loglikelihood=steps.loglikelihood,
         state=_EstimatorEMState(model),
         tol=model.tol,
-        max_iter=max_em_iter,
+        max_iter=model.max_em_iter,
         validate_initial_loglik=model._validate_initial_loglik,
         nonfinite_message="Non-finite penalized log-likelihood.",
     )
@@ -169,27 +188,27 @@ def fit_ggkm_em(model, t, delta, *, max_em_iter):
 class _EstimatorEMState:
     """Expose an estimator's existing progress without copying fit state."""
 
-    def __init__(self, model):
+    def __init__(self, model: _EstimatorProgress):
         self.model = model
 
     @property
-    def n_iter(self):
+    def n_iter(self) -> int:
         return self.model.n_iter_
 
     @n_iter.setter
-    def n_iter(self, value):
+    def n_iter(self, value: int) -> None:
         self.model.n_iter_ = value
 
     @property
-    def converged(self):
+    def converged(self) -> bool:
         return self.model.converged_
 
     @converged.setter
-    def converged(self, value):
+    def converged(self, value: bool) -> None:
         self.model.converged_ = value
 
     @property
-    def loglik_history(self):
+    def loglik_history(self) -> list[float]:
         return self.model.loglik_history_
 
 
@@ -224,14 +243,30 @@ class _LinearCureSteps(_GeneralizedGammaEMSteps):
         )
 
     def maximize_predictor(self, coefficients, expected):
+        # Optimize in coordinates with unit RMS design columns. Predictions
+        # and published coefficients continue to use the original feature units.
+        matrix = self.model.W_train_
+        magnitude = np.max(np.abs(matrix), axis=0)
+        magnitude = np.where(magnitude > 0.0, magnitude, 1.0)
+        normalized = matrix / magnitude
+        scales = magnitude * np.sqrt(np.mean(normalized * normalized, axis=0))
+        scales = np.where(scales > 0.0, scales, 1.0)
+        design = matrix / scales
+
+        def _predictor_value_and_grad(working_coefficients, expected):
+            return self.model._predictor_value_and_grad(
+                working_coefficients, expected, design_matrix=design
+            )
+
         result = minimize(
-            fun=self.model._predictor_value_and_grad,
-            x0=coefficients,
+            fun=_predictor_value_and_grad,
+            x0=coefficients * scales,
             jac=True,
             args=(expected,),
             method="L-BFGS-B",
         )
 
+        result.x = np.asarray(result.x, dtype=float) / scales
         self.model._validate_predictor_result(result)
         return result.x.copy()
 
@@ -256,7 +291,7 @@ def fit_linear_cure_em(model, t, delta):
         loglikelihood=steps.loglikelihood,
         state=_EstimatorEMState(model),
         tol=model.tol,
-        max_iter=model._max_em_iter,
+        max_iter=model.max_em_iter,
         validate_initial_loglik=model._validate_initial_loglik,
         nonfinite_message=f"Non-finite {model._model_name} log-likelihood.",
     )

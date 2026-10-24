@@ -13,6 +13,7 @@ tf = pytest.importorskip("tensorflow")
 pytest.importorskip("deepcure")
 
 from skcure.deep_learning import DeepPromotionTimeCure
+from skcure.deep_learning._loss import _StableDeepPTMEndpoint
 
 
 def _data():
@@ -55,6 +56,9 @@ def test_actual_backend_trains_network_and_baseline(
         random_state=73,
     ).fit(X, y)
     before_network, after_network, before_baseline, after_baseline = snapshots[0]
+    assert isinstance(model.model_.endpoint, _StableDeepPTMEndpoint)
+    assert model.model_.compute_dtype == "float64"
+    assert model.model_.stack_eta[0].compute_dtype == "float64"
     assert np.any(before_network != after_network)
     assert np.any(before_baseline != after_baseline)
     assert np.all(np.isfinite(model.history_["loss"]))
@@ -82,6 +86,106 @@ def test_actual_backend_trains_network_and_baseline(
         }, type="S1")
         expected.append(np.exp(-theta * (1 - np.asarray(native).ravel())))
     np.testing.assert_allclose(survival[:, 1:-1], np.asarray(expected).T, rtol=2e-6, atol=1e-8)
+
+
+def _endpoint(t_func, parametrization, parameters):
+    endpoint = _StableDeepPTMEndpoint(
+        t_func, parametrization,
+        np.array([0.0, 2.0]) if t_func == "pe" else None,
+    )
+    endpoint(tf.zeros((1, 1), dtype=tf.float64))
+    endpoint.set_weights([np.asarray(parameters, dtype=float)])
+    return endpoint
+
+
+@pytest.mark.parametrize("t_func", ["pe", "weibull"])
+@pytest.mark.parametrize("parametrization", [1, 2])
+def test_training_loss_keeps_small_baseline_cdf_and_its_predictor_gradient(
+    t_func, parametrization,
+):
+    parameters = [1e-8] if t_func == "pe" else [1.0, 1e8]
+    endpoint = _endpoint(t_func, parametrization, parameters)
+    eta = tf.Variable([[20.0]], dtype=tf.float64)
+    with tf.GradientTape() as tape:
+        endpoint(eta, event=tf.constant([0.0], tf.float64), timeset=tf.constant([1.0], tf.float64))
+        loss = tf.reduce_sum(endpoint.losses)
+    gradient = tape.gradient(loss, eta).numpy().item()
+    theta = np.exp(20.0) if parametrization == 1 else np.logaddexp(0.0, 20.0)
+    expected_loss = theta * (-np.expm1(-1e-8))
+    theta_derivative = np.exp(20.0) if parametrization == 1 else 1 / (1 + np.exp(-20.0))
+    np.testing.assert_allclose(loss.numpy(), expected_loss, rtol=2e-14)
+    np.testing.assert_allclose(gradient, theta_derivative * (-np.expm1(-1e-8)), rtol=2e-14)
+
+
+@pytest.mark.parametrize("t_func", ["pe", "weibull"])
+def test_training_loss_combines_extreme_predictor_and_underflowing_baseline(t_func):
+    parameters = [np.exp(-500.0)] if t_func == "pe" else [2.0, 1.0]
+    endpoint = _endpoint(t_func, 1, parameters)
+    eta = tf.Variable([[1000.0]], dtype=tf.float64)
+    with tf.GradientTape() as tape:
+        endpoint(
+            eta, event=tf.constant([0.0], tf.float64),
+            timeset=tf.constant([np.exp(-500.0)], tf.float64),
+        )
+        loss = tf.reduce_sum(endpoint.losses)
+    np.testing.assert_allclose(loss.numpy(), 1.0, rtol=1e-12)
+    np.testing.assert_allclose(tape.gradient(loss, eta).numpy(), [[1.0]], rtol=1e-12)
+
+
+@pytest.mark.parametrize("t_func", ["pe", "weibull"])
+def test_softplus_event_loss_remains_finite_for_very_negative_predictor(t_func):
+    endpoint = _endpoint(t_func, 2, [1.0] if t_func == "pe" else [1.0, 1.0])
+    eta = tf.Variable([[-1000.0]], dtype=tf.float64)
+    with tf.GradientTape() as tape:
+        endpoint(eta, event=tf.constant([1.0], tf.float64), timeset=tf.constant([1.0], tf.float64))
+        loss = tf.reduce_sum(endpoint.losses)
+    np.testing.assert_allclose(loss.numpy(), 1001.0)
+    np.testing.assert_allclose(tape.gradient(loss, eta).numpy(), [[-1.0]])
+
+
+@pytest.mark.parametrize("t_func", ["pe", "weibull"])
+def test_censored_extreme_baseline_hazard_has_finite_loss_and_gradients(t_func):
+    parameters = [np.exp(500.0)] if t_func == "pe" else [2.0, 1.0]
+    endpoint = _endpoint(t_func, 1, parameters)
+    eta = tf.Variable([[0.0]], dtype=tf.float64)
+    with tf.GradientTape() as tape:
+        endpoint(
+            eta, event=tf.constant([0.0], tf.float64),
+            timeset=tf.constant([np.exp(500.0)], tf.float64),
+        )
+        loss = tf.reduce_sum(endpoint.losses)
+    gradients = tape.gradient(loss, [eta, *endpoint.trainable_weights])
+    np.testing.assert_allclose(loss.numpy(), 1.0)
+    np.testing.assert_allclose(gradients[0].numpy(), [[1.0]])
+    assert all(np.all(np.isfinite(gradient.numpy())) for gradient in gradients)
+
+
+@pytest.mark.parametrize("t_func", ["pe", "weibull"])
+@pytest.mark.parametrize("parametrization", [1, 2])
+def test_endpoint_loss_matches_promotion_time_likelihood(t_func, parametrization):
+    endpoint = _endpoint(t_func, parametrization, [0.7] if t_func == "pe" else [1.3, 0.8])
+    eta = np.array([-2.0, 0.0, 3.0])
+    time = np.array([0.2, 0.8, 1.7])
+    event = np.array([1.0, 0.0, 1.0])
+    theta = np.exp(eta) if parametrization == 1 else np.logaddexp(0.0, eta)
+    if t_func == "pe":
+        hazard = 0.7 * time
+        log_rate = np.full(3, np.log(0.7))
+    else:
+        hazard = (time / 0.8) ** 1.3
+        log_rate = np.log(1.3) - np.log(0.8) + 0.3 * np.log(time / 0.8)
+    expected = theta * (-np.expm1(-hazard)) - event * (np.log(theta) + log_rate - hazard)
+    endpoint(
+        tf.constant(eta[:, None], tf.float64),
+        event=tf.constant(event, tf.float64), timeset=tf.constant(time, tf.float64),
+    )
+    np.testing.assert_allclose(endpoint.losses[0].numpy(), expected, rtol=2e-14)
+
+
+def test_baseline_projection_cannot_reach_zero():
+    endpoint = _endpoint("pe", 1, [1.0])
+    projected = endpoint.trainable_weights[0].constraint(tf.constant([-1.0], tf.float64))
+    assert projected.numpy()[0] > 0.0
 
 
 def test_actual_backend_early_stopping_refits_the_selected_checkpoint():
@@ -127,6 +231,7 @@ def test_fitted_pickle_preserves_network_after_constructor_parameters_change(
     assert restored.t_func_ == t_func
     assert restored.parametrization_ == parametrization
     assert restored.model_ is not model.model_
+    assert isinstance(restored.model_.endpoint, _StableDeepPTMEndpoint)
     assert restored.model_.optimizer.__class__.__name__ == "Adam"
     assert len(restored.model_.stack_eta) == len(model.model_.stack_eta)
     np.testing.assert_array_equal(restored.unique_times_, model.unique_times_)

@@ -15,6 +15,8 @@ class MixtureCure(_BaseLinearCureModel):
     One Bernoulli susceptibility indicator is represented by the shared
     binomial latent-count model with ``K_bin=1``. Generalized-gamma latency and
     its optimizer are the same components used by GGKM and GradientBoostingCure.
+    Incidence optimization scales its coordinates internally; fitted
+    coefficients and predictions retain the original feature units.
     """
 
     _latent_model = _BinomialLatentModel(K_bin=1)
@@ -55,6 +57,8 @@ class PromotionTimeCure(_BaseLinearCureModel):
     This is the linear-predictor counterpart of a Poisson GGKM or
     GradientBoostingCure model. Poisson latent counts, generalized-gamma latency,
     and the shared latency optimizer are reused directly.
+    Incidence optimization scales its coordinates internally; fitted
+    coefficients and predictions retain the original feature units.
     """
 
     _latent_model = _PoissonLatentModel()

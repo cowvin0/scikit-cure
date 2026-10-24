@@ -685,7 +685,9 @@ _LEGACY_EXPECTED = [
     _LEGACY_EXPECTED,
     ids=["poisson", "binomial", "nb-fixed", "nb-estimated"],
 )
-def test_fitting_preserves_legacy_predictions_for_fixed_kernel(expected, survival_data):
+def test_fixed_kernel_fit_improves_legacy_likelihood_and_matches_count_formulas(
+    expected, survival_data
+):
     X, y = survival_data
     # Hold the legacy Gram matrix fixed to test the optimizer independently
     # of rounding differences between SciPy's and sklearn's RBF distances.
@@ -699,32 +701,25 @@ def test_fitting_preserves_legacy_predictions_for_fixed_kernel(expected, surviva
         max_em_iter=2,
         **expected["kwargs"],
     ).fit(K, y)
-    times = [0.0, 0.5, 1.5, 3.0, 5.0]
-    # Optimizer trajectories can vary slightly across supported NumPy/SciPy
-    # versions and platforms even with the Gram matrix held fixed.
-    rtol = 5e-3
-    atol = 1e-6
-
-    np.testing.assert_allclose(
-        model.predict(K_new),
-        expected["eta"],
-        rtol=rtol,
-        atol=atol,
-    )
-    np.testing.assert_allclose(
-        model.predict_survival(K_new, times),
-        expected["survival"],
-        rtol=rtol,
-        atol=atol,
-    )
-    np.testing.assert_allclose(
-        model.predict_cure_probability(K_new),
-        expected["cure"],
-        rtol=rtol,
-        atol=atol,
-    )
-    assert model.final_loglik_ == pytest.approx(
-        expected["loglik"],
-        rel=rtol,
-        abs=atol,
-    )
+    times = np.array([0.0, 0.5, 1.5, 3.0, 5.0])
+    eta = model.beta0_ + K_new @ model.alpha_
+    with np.errstate(over="ignore"):
+        F = gammainc(model.d_ / model.p_, (times / model.a_) ** model.p_)
+    if expected["distribution"] == "binomial":
+        probability = expit(eta)
+        survival = (1. - probability[:, None] * F) ** model.K_bin
+        cure = (1. - probability) ** model.K_bin
+    else:
+        intensity = np.exp(eta)
+        if expected["distribution"] == "poisson":
+            survival = np.exp(-intensity[:, None] * F)
+            cure = np.exp(-intensity)
+        else:
+            survival = np.exp(-np.log1p(model.phi_ * intensity[:, None] * F) / model.phi_)
+            cure = np.exp(-np.log1p(model.phi_ * intensity) / model.phi_)
+    np.testing.assert_allclose(model.predict(K_new), eta, rtol=1e-13)
+    np.testing.assert_allclose(model.predict_survival(K_new, times), survival, rtol=1e-12)
+    np.testing.assert_allclose(model.predict_cure_probability(K_new), cure, rtol=1e-12)
+    # Stable tail derivatives change the historical L-BFGS path. Compare the
+    # attained likelihood, rather than requiring the old suboptimal solution.
+    assert model.final_loglik_ >= expected["loglik"] - 1e-6

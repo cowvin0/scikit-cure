@@ -26,6 +26,7 @@ class _BaseLinearCureModel(_BaseParametricCureEstimator):
     _predictor_error: str
     _predictor_optimization_error: str
     _initialize_intercept_from_cure = False
+    fit_intercept: bool
 
     def _make_latent_model(self) -> _LatentCountModel:
         raise NotImplementedError
@@ -144,8 +145,9 @@ class _BaseLinearCureModel(_BaseParametricCureEstimator):
             delta,
         )
 
-    def _predictor_value_and_grad(self, coefficients, expected):
-        eta = self._predictor_from_coefficients(coefficients)
+    def _predictor_value_and_grad(self, coefficients, expected, *, design_matrix=None):
+        matrix = self.W_train_ if design_matrix is None else design_matrix
+        eta = matrix @ coefficients
 
         value, gradient_eta = self._latent_model.incidence_value_and_grad(
             eta,
@@ -154,7 +156,7 @@ class _BaseLinearCureModel(_BaseParametricCureEstimator):
 
         return (
             value,
-            self.W_train_.T @ gradient_eta,
+            matrix.T @ gradient_eta,
         )
 
     def _gg_log_value_and_grad(self, log_pars, t, delta, expected):
@@ -232,6 +234,14 @@ class _BaseLinearCureModel(_BaseParametricCureEstimator):
             self._latency,
             eta,
             times,
+        )
+
+    def predict_log_survival(self, X, times) -> np.ndarray:
+        """Evaluate log survival without first rounding survival probabilities."""
+        eta = self.predict_eta(X)
+        times = self._validate_times(times)
+        return self._latent_model.predict_log_survival_from_eta(
+            self._latency, eta, times
         )
 
     def predict_cure_probability(self, X):

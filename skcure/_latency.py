@@ -30,31 +30,17 @@ class _LatencyOptimizer(Protocol):
 class _GeneralizedGammaLatencyOptimizer:
     """Generalized-gamma latency optimizer used by GGKM.
 
-    The optimizer owns the shared generalized-gamma objective and
-    log-parameter transformation. Small latent-count-specific numerical
-    differences are delegated to the supplied latent-count model so that
-    the current Poisson, negative-binomial, and binomial behavior is
-    preserved exactly during the refactor.
+    The objective uses log-survival evaluations and direct tail derivatives
+    to retain information after probabilities underflow. Positive latency
+    parameters are optimized on the log scale and validated before updates.
     """
 
     @staticmethod
     def _invalid_value_and_grad(latent_model):
-        """Return the legacy GG invalid-objective sentinel for each family."""
-        if latent_model.name == "poisson":
-            return (
-                np.inf,
-                np.full(
-                    3,
-                    np.nan,
-                ),
-            )
-
+        """Reject invalid trials without presenting a stationary finite point."""
         return (
-            1.0e100,
-            np.zeros(
-                3,
-                dtype=float,
-            ),
+            np.inf,
+            np.full(3, np.nan),
         )
 
     @staticmethod
@@ -73,23 +59,19 @@ class _GeneralizedGammaLatencyOptimizer:
 
     @staticmethod
     def _log_objective_is_invalid(latent_model, value):
-        """Apply the legacy family rule for log-scale objective rejection."""
-        if latent_model.name == "poisson":
-            return False
-
-        return value >= 1.0e99
+        """Reject non-finite objectives and former finite penalty sentinels."""
+        return not np.isfinite(value)
 
     @staticmethod
     def _validate_result(latent_model, result):
-        """Validate the GG optimizer result without changing legacy semantics."""
-        if latent_model.name == "negative_binomial":
-            invalid = not result.success or not np.all(np.isfinite(result.x))
-        else:
-            invalid = (
-                not result.success
-                or not np.isfinite(result.fun)
-                or not np.all(np.isfinite(result.x))
-            )
+        """Require a finite objective, parameters, and available gradient."""
+        invalid = (
+            not result.success
+            or not np.isfinite(result.fun)
+            or np.shape(result.x) != (3,)
+            or not np.all(np.isfinite(result.x))
+            or not np.all(np.isfinite(getattr(result, "jac", np.zeros(3))))
+        )
 
         if invalid:
             raise RuntimeError(
@@ -100,13 +82,10 @@ class _GeneralizedGammaLatencyOptimizer:
 
     @staticmethod
     def _validate_log_parameters(latent_model, log_pars):
-        """Validate optimized GG log-parameters using the legacy family rules."""
-        if latent_model.name == "poisson":
-            return
-
+        """Validate optimized GG log-parameters before exponentiation."""
         log_max = _maximum_log_float()
 
-        if np.any(log_pars > log_max):
+        if np.any(~np.isfinite(log_pars)) or np.any(log_pars > log_max):
             raise FloatingPointError(
                 "Generalized-gamma log-parameter "
                 "optimization returned values outside "
@@ -115,10 +94,7 @@ class _GeneralizedGammaLatencyOptimizer:
 
     @staticmethod
     def _prepare_parameters(latent_model, pars):
-        """Prepare natural-scale GG parameters using legacy family semantics."""
-        if latent_model.name != "poisson":
-            return pars
-
+        """Require all latency objectives to receive three parameters."""
         pars = np.asarray(
             pars,
             dtype=float,
@@ -345,7 +321,10 @@ class _GeneralizedGammaLatencyOptimizer:
         if SGG is None:
             return self._invalid_value_and_grad(latent_model)
 
-        log_SGG = latent_model.log_nonnegative(SGG)
+        try:
+            log_SGG = generalized_gamma.logsf(t, a, d, p)
+        except FloatingPointError:
+            return self._invalid_value_and_grad(latent_model)
         log_fGG = generalized_gamma._gg_log_density(
             log_t,
             u,
@@ -449,14 +428,14 @@ class _GeneralizedGammaLatencyOptimizer:
             if np.any(~np.isfinite(H_over_S)):
                 return self._invalid_value_and_grad(latent_model)
 
-            G = pgamma_shape_derivative_vec(
-                u_surv,
-                s,
-            )
-            G = np.asarray(
-                G,
-                dtype=float,
-            )
+            upper_tail = (u_surv >= s + 1.0) & (log_S_surv < -500.0)
+            lower_tail = np.isfinite(log_u_surv) & (log_u_surv < -700.0)
+            G = np.zeros_like(u_surv)
+            regular_shape_derivative = ~(upper_tail | lower_tail)
+            if np.any(regular_shape_derivative):
+                G[regular_shape_derivative] = pgamma_shape_derivative_vec(
+                    u_surv[regular_shape_derivative], s
+                )
 
             if np.any(~np.isfinite(G)):
                 return self._invalid_value_and_grad(latent_model)
@@ -466,7 +445,29 @@ class _GeneralizedGammaLatencyOptimizer:
                 dtype=float,
             )
 
-            nonzero_G = G != 0.0
+            # dP/ds and Q can both vanish numerically in the upper tail.
+            # Evaluate their ratio from a differentiated continued fraction.
+            if np.any(upper_tail):
+                _, tail_G_over_S, tail_H_over_S = (
+                    generalized_gamma._gamma_upper_tail_terms(
+                        s, u_surv[upper_tail], log_u_surv[upper_tail]
+                    )
+                )
+                G_over_S[upper_tail] = tail_G_over_S
+                H_over_S[upper_tail] = tail_H_over_S
+
+            if np.any(lower_tail):
+                log_P, dlog_P = (
+                    generalized_gamma._gamma_lower_log_and_shape_derivative(
+                        s, u_surv[lower_tail], log_u_surv[lower_tail]
+                    )
+                )
+                with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+                    G_over_S[lower_tail] = (
+                        np.exp(log_P - log_S_surv[lower_tail]) * dlog_P
+                    )
+
+            nonzero_G = (G != 0.0) & regular_shape_derivative
 
             if np.any(nonzero_G):
                 with np.errstate(
@@ -654,6 +655,30 @@ class _GeneralizedGammaLatencyOptimizer:
             latent_model,
             result_gg.x,
         )
+
+        # Optimizer status and cached result.fun are insufficient: reevaluate
+        # the actual candidate before exposing any changed distribution state.
+        final_value, final_gradient = objective(result_gg.x, t, delta, expected)
+        if self._log_objective_is_invalid(latent_model, final_value) or not np.all(
+            np.isfinite(final_gradient)
+        ):
+            raise RuntimeError(
+                "Generalized-gamma log-parameter optimization failed: "
+                "the final objective or gradient is invalid."
+            )
+        initial_value, initial_gradient = objective(log_gg_start, t, delta, expected)
+        if self._log_objective_is_invalid(latent_model, initial_value) or not np.all(
+            np.isfinite(initial_gradient)
+        ):
+            raise RuntimeError(
+                "Generalized-gamma log-parameter optimization failed: "
+                "the initial objective or gradient is invalid."
+            )
+        tolerance = 64.0 * np.finfo(float).eps * (1.0 + abs(initial_value))
+        if final_value > initial_value + tolerance:
+            # A generalized EM step may retain the current parameters; it
+            # must not accept a finite candidate that decreases its objective.
+            return
 
         gg_pars = np.exp(result_gg.x)
 

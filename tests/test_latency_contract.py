@@ -6,6 +6,8 @@ import pytest
 from skcure.distributions import GeneralizedGamma
 from skcure.distributions.base import (
     LatencyDistribution,
+    latency_logcdf,
+    latency_logsf,
     validate_latency_distribution,
 )
 from skcure._latent import (
@@ -51,6 +53,21 @@ def test_latency_distribution_contract_is_structural():
 
     assert isinstance(latency, LatencyDistribution)
     assert validate_latency_distribution(latency) is latency
+
+
+def test_log_probability_helpers_support_existing_distribution_contract():
+    latency = _ExponentialLatency()
+    time = np.array([0.0, 0.5, 2.0, np.nan])
+    with np.errstate(divide="ignore"):
+        np.testing.assert_allclose(latency_logcdf(latency, time), np.log(latency.cdf(time)))
+        np.testing.assert_allclose(latency_logsf(latency, time), np.log(latency.sf(time)))
+
+
+def test_log_probability_helpers_prefer_direct_log_evaluations():
+    latency = GeneralizedGamma()
+    time = np.array([720.0, 1000.0])
+    np.testing.assert_allclose(latency_logsf(latency, time), -time, rtol=1e-14)
+    assert np.isfinite(latency_logcdf(GeneralizedGamma(d=2.0), [1.0e-200])).all()
 
 
 def test_latency_distribution_validator_rejects_incomplete_object():

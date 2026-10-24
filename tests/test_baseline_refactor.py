@@ -42,7 +42,7 @@ def _cases():
         "nondefault_initial_values": {"a": 1.2, "d": 0.9, "p": 1.1},
         "early_convergence": {"tol": 1e6},
         "iteration_cap": {"max_em_iter": 1},
-        "default_iteration_limit": {"max_em_iter": None, "tol": 1e6},
+        "default_iteration_limit": {"tol": 1e6},
         "cold_refit": {},
         "warm_refit": {"warm_start": True},
         "warm_no_intercept": {
@@ -69,7 +69,7 @@ def _assert_valid_fit(model, X, y, X_test):
     assert model.p_ > 0.0
 
     assert model.n_iter_ >= 1
-    assert model.n_iter_ <= model._max_em_iter
+    assert model.n_iter_ <= model.max_em_iter
     assert len(model.loglik_history_) == model.n_iter_
     assert np.all(np.isfinite(model.loglik_history_))
     assert np.isfinite(model.final_loglik_)
@@ -157,7 +157,7 @@ def test_linear_baseline_fit_and_refit_invariants(family, case):
         X = X[:, :1]
         X_test = X_test[:, :1]
 
-    parameters = {"max_em_iter": 3}
+    parameters = {} if case == "default_iteration_limit" else {"max_em_iter": 3}
     parameters.update(_cases()[case])
     model = model_class(**parameters)
 
@@ -173,7 +173,7 @@ def test_linear_baseline_fit_and_refit_invariants(family, case):
         assert model.n_iter_ == 1
 
     if case == "default_iteration_limit":
-        assert model._max_em_iter == 1000
+        assert model.max_em_iter == 1000
 
     if model.fit_intercept:
         assert model.coef_.shape == (X.shape[1],)

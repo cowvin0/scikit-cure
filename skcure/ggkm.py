@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from math import isfinite
 from numbers import Real
 
 import numpy as np
@@ -25,6 +26,7 @@ from skcure._latent import (
 from skcure.utils.kernels import (
     _validate_kernel_hyperparameters,
     _validate_kernel_matrix,
+    _validate_positive_semidefinite,
     cauchy_kernel,
     exponential_kernel,
     wavelet_kernel,
@@ -56,16 +58,20 @@ class GGKM(BaseCureEstimator):
         kernel matrix, preserving GGKM's vectorized callable interface.
         With "precomputed", fit accepts a square training kernel matrix and
         prediction accepts a matrix of kernels between new and training samples.
+        Training kernels must be positive semidefinite. Callable, precomputed,
+        sigmoid, and additive-chi-squared matrices are checked explicitly,
+        allowing numerical roundoff in their eigenvalues.
     kernel_params : mapping or None, default=None
         Keyword arguments for a callable kernel.
     lambda_reg : float, default=1e-3
         Non-negative coefficient of the kernel regularization penalty.
     gamma : float, default=1.0
-        Scale for built-in nonlinear kernels.
+        Non-negative scale for built-in nonlinear kernels.
     degree : int, default=3
         Positive polynomial kernel degree.
     coef0 : float, default=0.0
-        Offset for polynomial and sigmoid kernels.
+        Offset for polynomial and sigmoid kernels. Must be non-negative for
+        polynomial kernels to preserve a positive-semidefinite kernel.
     A : float, default=10
         Positive wavelet kernel scale.
     warm_start : bool, default=False
@@ -73,8 +79,8 @@ class GGKM(BaseCureEstimator):
         Predictor coefficients are initialized again on each fit.
     tol : float, default=1e-6
         Positive absolute log-likelihood tolerance for EM convergence.
-    max_em_iter : int or None, default=None
-        Maximum EM iterations. None uses a limit of 1000.
+    max_em_iter : int, default=1000
+        Maximum number of EM iterations. Must be a positive integer.
 
     Attributes
     ----------
@@ -181,58 +187,60 @@ class GGKM(BaseCureEstimator):
         return _BinomialLatentModel(K_bin=K_bin)
 
     def _reset_parameters_for_fit(self):
-        self._latency = validate_latency_distribution(
-            GeneralizedGamma(
-                a=self.a,
-                d=self.d,
-                p=self.p,
-            )
+        latency = GeneralizedGamma(
+            a=self.a,
+            d=self.d,
+            p=self.p,
         )
+        validate_latency_distribution(latency)
+        self._latency = latency
 
         self._latency_optimizer = _GeneralizedGammaLatencyOptimizer()
         self._latent_model.reset_for_fit()
 
     @property
-    def a_(self):
+    def a_(self) -> float:
         return self._latency.a
 
     @property
-    def d_(self):
+    def d_(self) -> float:
         return self._latency.d
 
     @property
-    def p_(self):
+    def p_(self) -> float:
         return self._latency.p
 
     def _reset_fit_results(self):
         """Initialize fitted result attributes for a new fit."""
-        self.beta0_ = None
-        self.alpha_ = None
-        self.K_ = None
-        self.X_train_ = None
-        self.loglik_history_ = []
+        self.beta0_: float | None = None
+        self.alpha_: np.ndarray | None = None
+        self.K_: np.ndarray | None = None
+        self.X_train_: np.ndarray | None = None
+        self.loglik_history_: list[float] = []
         self.converged_ = False
         self.n_iter_ = 0
-        self.final_loglik_ = None
+        self.final_loglik_: float | None = None
 
     @property
-    def estimate_phi(self):
-        if self._latent_model.name != self._NB:
+    def estimate_phi(self) -> bool:
+        latent_model = self._latent_model
+        if not isinstance(latent_model, _NegativeBinomialLatentModel):
             raise AttributeError(
                 "estimate_phi is defined only for "
                 "latent_distribution='negative_binomial'."
             )
 
-        return self._latent_model.estimate_phi
+        return latent_model.estimate_phi
 
     @property
-    def phi_(self):
-        if self._latent_model.name != self._NB:
+    def phi_(self) -> float | None:
+        latent_model = self._latent_model
+        if not isinstance(latent_model, _NegativeBinomialLatentModel):
             raise AttributeError(
                 "phi_ is defined only for " "latent_distribution='negative_binomial'."
             )
 
-        return self._latent_model.phi_
+        return latent_model.phi_
 
     def __sklearn_is_fitted__(self):
         return getattr(self, "_is_fitted", False)
@@ -242,10 +250,10 @@ class GGKM(BaseCureEstimator):
         tags.input_tags.pairwise = self.kernel == "precomputed"
         return tags
 
-    def _compute_kernel(self, X1, X2):
+    def _compute_kernel(self, X1, X2) -> np.ndarray:
         """Compute validated training or new-versus-training kernel matrices."""
         X1, X2 = check_pairwise_arrays(
-            X1, X2, dtype=float, precomputed=self.kernel == "precomputed"
+            X1, X2, dtype="float64", precomputed=self.kernel == "precomputed"
         )
         if callable(self.kernel):
             K = self.kernel(X1, X2, **(self.kernel_params or {}))
@@ -268,7 +276,7 @@ class GGKM(BaseCureEstimator):
             )
         return _validate_kernel_matrix(K, (X1.shape[0], X2.shape[0]))
 
-    def _validate_parameters_for_fit(self):
+    def _validate_parameters_for_fit(self) -> _LatentCountModel:
         """Validate current parameters, including changes from set_params."""
         self._validate_em_parameters(nonnegative=("lambda_reg",))
         if not isinstance(self.kernel, str) and not callable(self.kernel):
@@ -281,14 +289,16 @@ class GGKM(BaseCureEstimator):
             raise ValueError(
                 "kernel_params can only be supplied when kernel is callable."
             )
-        _validate_kernel_hyperparameters(self.gamma, self.degree, self.coef0, self.A)
+        _validate_kernel_hyperparameters(
+            self.gamma, self.degree, self.coef0, self.A, kernel=self.kernel
+        )
         distribution = self._normalize_latent_distribution(self.latent_distribution)
         if (
             distribution == self._NB
             and self.phi is not None
             and (
                 not isinstance(self.phi, Real)
-                or not np.isfinite(self.phi)
+                or not isfinite(self.phi)
                 or self.phi <= 0
             )
         ):
@@ -307,21 +317,25 @@ class GGKM(BaseCureEstimator):
         self,
         beta0,
         alpha,
-    ):
+    ) -> np.ndarray:
+        assert self.K_ is not None
         return beta0 + self.K_ @ alpha
 
-    def _compute_prediction_kernel(self, X_new):
+    def _compute_prediction_kernel(self, X_new) -> np.ndarray:
         """Compute kernels between prediction samples and the training samples."""
+        assert self.X_train_ is not None
         return self._compute_kernel(
             X_new,
             self.X_train_,
         )
 
-    def _predictor_from_kernel(self, K_new):
+    def _predictor_from_kernel(self, K_new) -> np.ndarray:
         """Evaluate the fitted kernel predictor from a prediction kernel matrix."""
+        assert self.beta0_ is not None
+        assert self.alpha_ is not None
         return self.beta0_ + K_new @ self.alpha_
 
-    def _predict_eta_from_validated_X(self, X_new):
+    def _predict_eta_from_validated_X(self, X_new) -> np.ndarray:
         """Evaluate the fitted kernel predictor with legacy family validation."""
         if self._latent_model.name == self._POISSON:
             X_new = np.asarray(
@@ -378,6 +392,7 @@ class GGKM(BaseCureEstimator):
         return eta
 
     def _kernel_penalty(self, alpha):
+        assert self.K_ is not None
         K_alpha = self.K_ @ alpha
         penalty = (self.lambda_reg / 2.0) * (alpha @ K_alpha)
         return K_alpha, penalty
@@ -387,6 +402,7 @@ class GGKM(BaseCureEstimator):
         score,
         K_alpha,
     ):
+        assert self.K_ is not None
         grad_beta0 = np.sum(score)
         grad_alpha = self.K_.T @ score - self.lambda_reg * K_alpha
         grad = np.concatenate(
@@ -471,7 +487,7 @@ class GGKM(BaseCureEstimator):
             Nhat,
         )
 
-        if self._latent_model.name != self._NB and (
+        if (
             not np.isfinite(incidence_value) or np.any(~np.isfinite(incidence_grad))
         ):
             return (
@@ -493,7 +509,7 @@ class GGKM(BaseCureEstimator):
             K_alpha,
         )
 
-        if self._latent_model.name != self._NB and (
+        if (
             not np.isfinite(Q) or np.any(~np.isfinite(grad))
         ):
             return (
@@ -508,7 +524,11 @@ class GGKM(BaseCureEstimator):
 
     def _validate_predictor_result(self, result):
         if self._latent_model.name == self._NB:
-            if not result.success or not np.all(np.isfinite(result.x)):
+            if (
+                not result.success
+                or not np.isfinite(result.fun)
+                or not np.all(np.isfinite(result.x))
+            ):
                 raise RuntimeError(
                     "Negative-binomial predictor "
                     "optimization failed: "
@@ -529,9 +549,6 @@ class GGKM(BaseCureEstimator):
             raise RuntimeError(prefix + f"{result.message}")
 
     def _validate_initial_loglik(self, ll_old):
-        if self._latent_model.name == self._NB:
-            return None
-
         if not np.isfinite(ll_old):
             raise FloatingPointError("Initial penalized log-likelihood is non-finite.")
 
@@ -541,8 +558,9 @@ class GGKM(BaseCureEstimator):
         alpha,
         t,
         delta,
-    ):
-        if self._latent_model.name != self._NB:
+    ) -> None:
+        latent_model = self._latent_model
+        if not isinstance(latent_model, _NegativeBinomialLatentModel):
             return None
 
         eta = self._predictor(
@@ -550,7 +568,7 @@ class GGKM(BaseCureEstimator):
             alpha,
         )
 
-        return self._latent_model.update_after_latency_in_log_space_from_eta(
+        return latent_model.update_after_latency_in_log_space_from_eta(
             self._latency,
             eta,
             t,
@@ -563,7 +581,7 @@ class GGKM(BaseCureEstimator):
     ):
         return self._latent_model.initial_beta0(approximate_cure)
 
-    def fit(self, X, y):
+    def fit(self, X, y) -> GGKM:
         """Fit the cure model to right-censored survival observations.
 
         Parameters
@@ -598,7 +616,6 @@ class GGKM(BaseCureEstimator):
         self._reset_fit_results()
         if not reuse:
             self._reset_parameters_for_fit()
-        # max_em_iter = 1000 if self.max_em_iter is None else self.max_em_iter
 
         self.X_train_ = X.copy()
         self.K_ = self._compute_kernel(
@@ -615,13 +632,15 @@ class GGKM(BaseCureEstimator):
             raise ValueError(
                 "The kernel must produce a symmetric " "training kernel matrix."
             )
-        fit_ggkm_em(self, t, delta, max_em_iter=self.max_em_iter)
+        if callable(self.kernel) or self.kernel in {"precomputed", "sigmoid", "additive_chi2"}:
+            _validate_positive_semidefinite(self.K_)
+        fit_ggkm_em(self, t, delta)
         self.unique_times_ = np.unique(t)
         self._is_fitted = True
 
         return self
 
-    def predict(self, X):
+    def predict(self, X) -> np.ndarray:
         """Return the linear predictor; larger scores indicate greater risk.
 
         With ``kernel="precomputed"``, X has shape (n_samples, n_train_samples)
@@ -629,22 +648,24 @@ class GGKM(BaseCureEstimator):
         """
         return self.predict_eta(X)
 
-    def predict_eta(self, X):
+    def predict_eta(self, X) -> np.ndarray:
         """Return the fitted kernel predictor for each sample."""
         X = self._validate_predict_data(X)
         return self._predict_eta_from_validated_X(X)
 
-    def predict_theta(self, X):
+    def predict_theta(self, X) -> np.ndarray:
         """Return Poisson latent intensities (Poisson models only)."""
         X = self._validate_predict_data(X)
 
         if self._latent_model.name != self._POISSON:
-            return self._latent_model.predict_theta_from_eta(None)
+            raise RuntimeError(
+                "predict_theta is defined only for latent_distribution='poisson'."
+            )
 
         eta = self._predict_eta_from_validated_X(X)
         return self._latent_model.predict_theta_from_eta(eta)
 
-    def predict_survival(self, X, times):
+    def predict_survival(self, X, times) -> np.ndarray:
         """Return continuous survival probabilities of shape (n_samples, n_times).
 
         Unlike the step function API, this evaluates the parametric model
@@ -661,7 +682,15 @@ class GGKM(BaseCureEstimator):
             times,
         )
 
-    def predict_cure_probability(self, X):
+    def predict_log_survival(self, X, times) -> np.ndarray:
+        """Evaluate log survival without first rounding survival probabilities."""
+        eta = self.predict_eta(X)
+        times = self._validate_times(times)
+        return self._latent_model.predict_log_survival_from_eta(
+            self._latency, eta, times
+        )
+
+    def predict_cure_probability(self, X) -> np.ndarray:
         """Return the limiting survival probability for each sample."""
         X = self._validate_predict_data(X)
 
