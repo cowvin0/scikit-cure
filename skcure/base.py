@@ -1,6 +1,7 @@
 """Shared interface for scikit-survival compatible cure estimators."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from math import isfinite
 from numbers import Integral, Real
 
@@ -44,6 +45,14 @@ class BaseCureEstimator(SurvivalAnalysisMixin, BaseEstimator, ABC):
     def predict_cure_probability(self, X) -> np.ndarray:
         """Return each sample's limiting survival probability."""
 
+    def predict_latent_mean(self, X) -> np.ndarray:
+        """Return the unconditional expected number of latent event causes.
+
+        This is distinct from the risk score and from an E-step posterior
+        expectation, which also conditions on the observed survival outcome.
+        """
+        raise NotImplementedError("This estimator does not expose latent counts.")
+
     def _validate_fit_data(self, X, y) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         X = np.asarray(validate_data(self, X, dtype=np.float64, ensure_min_samples=2))
         event, time = check_array_survival(X, y, allow_time_zero=False)
@@ -68,6 +77,53 @@ class BaseCureEstimator(SurvivalAnalysisMixin, BaseEstimator, ABC):
             or self.max_em_iter < 1
         ):
             raise ValueError("max_em_iter must be a positive integer.")
+        em_rtol = getattr(self, "em_rtol", 0.0)
+        if (
+            not isinstance(em_rtol, Real)
+            or isinstance(em_rtol, (bool, np.bool_))
+            or not isfinite(em_rtol)
+            or em_rtol < 0.0
+        ):
+            raise ValueError("em_rtol must be non-negative and finite.")
+        self._validate_solver_options()
+
+    def _validate_solver_options(self):
+        """Validate separate L-BFGS-B settings for the three EM M-steps."""
+        settings = getattr(self, "solver_options", None)
+        if settings is None:
+            return
+        if not isinstance(settings, Mapping):
+            raise TypeError("solver_options must be a mapping or None.")
+        stages = {"incidence", "latency", "dispersion"}
+        if set(settings) - stages:
+            raise ValueError(
+                "solver_options keys must be incidence, latency, or dispersion."
+            )
+        integer_options = {"maxiter", "maxfun", "maxls", "maxcor"}
+        real_options = {"ftol", "gtol"}
+        for stage, options in settings.items():
+            if not isinstance(options, Mapping):
+                raise TypeError(f"solver_options[{stage!r}] must be a mapping.")
+            if set(options) - integer_options - real_options:
+                raise ValueError(
+                    f"Unsupported {stage} solver option. Supported options are "
+                    "ftol, gtol, maxiter, maxfun, maxls, and maxcor."
+                )
+            for name, value in options.items():
+                if name in integer_options:
+                    if (
+                        not isinstance(value, Integral)
+                        or isinstance(value, (bool, np.bool_))
+                        or value < 1
+                    ):
+                        raise ValueError(f"{stage}.{name} must be a positive integer.")
+                elif (
+                    not isinstance(value, Real)
+                    or isinstance(value, (bool, np.bool_))
+                    or not isfinite(value)
+                    or value < 0.0
+                ):
+                    raise ValueError(f"{stage}.{name} must be non-negative and finite.")
 
     def _validate_predict_data(self, X) -> np.ndarray:
         check_is_fitted(self)
@@ -169,6 +225,24 @@ class _BaseParametricCureEstimator(BaseCureEstimator):
         """Validate inputs, initialize learned parameters, and reset fit history."""
         was_fitted = self.__sklearn_is_fitted__()
         self._is_fitted = False
+        self.loglik_history_ = []
+        self.converged_ = False
+        self.n_iter_ = 0
+        self.final_loglik_ = None
+        self.termination_reason_ = "running"
+        self.optimizer_results_ = []
+        try:
+            return self._prepare_fit_parameters(
+                X, y, was_fitted=was_fitted, nonnegative=nonnegative, booleans=booleans
+            )
+        except Exception:
+            self.termination_reason_ = "failed"
+            raise
+
+    def _prepare_fit_parameters(
+        self, X, y, *, was_fitted, nonnegative, booleans
+    ):
+        """Initialize components after progress has been reset for this attempt."""
         self._validate_em_parameters(
             nonnegative=nonnegative,
             booleans=booleans,
@@ -194,10 +268,6 @@ class _BaseParametricCureEstimator(BaseCureEstimator):
                 self.phi_ = 0.5 if phi is None else float(phi)
             self.estimate_phi_ = phi is None
             self._phi_parameter = phi
-        self.loglik_history_ = []
-        self.converged_ = False
-        self.n_iter_ = 0
-        self.final_loglik_ = None
         return X, time, event.astype(float)
 
     def _finish_fit(self, time):

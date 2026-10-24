@@ -193,6 +193,14 @@ class _BaseLinearCureModel(_BaseParametricCureEstimator):
 
     def fit(self, X, y):
         """Fit using a structured boolean-event/observed-time target."""
+        try:
+            return self._fit(X, y)
+        except Exception:
+            self._is_fitted = False
+            self.termination_reason_ = "failed"
+            raise
+
+    def _fit(self, X, y):
         X, t, delta = self._prepare_fit(
             X,
             y,
@@ -222,6 +230,11 @@ class _BaseLinearCureModel(_BaseParametricCureEstimator):
             raise FloatingPointError(self._predictor_error)
 
         return eta
+
+    def predict_latent_mean(self, X) -> np.ndarray:
+        """Return E[N | X], the unconditional mean latent count."""
+        eta = self.predict_eta(X)
+        return self._latent_model.predict_latent_mean_from_eta(eta)
 
     def predict_survival(self, X, times):
         """Evaluate population survival at finite non-negative times."""

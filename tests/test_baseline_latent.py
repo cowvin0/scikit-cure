@@ -4,6 +4,7 @@ import pickle
 
 import numpy as np
 import pytest
+from sklearn.exceptions import ConvergenceWarning
 from sksurv.util import Surv
 
 from skcure import GGKM
@@ -105,7 +106,8 @@ def test_fit_and_predictions_call_shared_family_entrypoints(
         record_calls(label, shared_method)
 
     X, y = _training_data()
-    model.fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model.fit(X, y)
     model.predict_survival(X[:2], [0.0, 0.5, 2.0])
     model.predict_cure_probability(X[:2])
     assert all(count > 0 for count in calls.values()), calls
@@ -183,7 +185,8 @@ def test_fitted_pickle_preserves_composed_strategy_state(
     objective,
 ):
     X, y = _training_data()
-    model = estimator_class(max_em_iter=1).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = estimator_class(max_em_iter=1).fit(X, y)
 
     assert isinstance(model._latent_model, strategy_class)
     assert model.a_ == model._latency.a

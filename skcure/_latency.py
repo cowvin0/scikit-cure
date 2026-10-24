@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
 
 import numpy as np
@@ -22,6 +23,9 @@ class _LatencyOptimizer(Protocol):
         t,
         delta,
         expected,
+        *,
+        options=None,
+        result_callback: Callable | None = None,
     ) -> None:
         """Update latency parameters in place."""
         ...
@@ -606,6 +610,9 @@ class _GeneralizedGammaLatencyOptimizer:
         t,
         delta,
         expected,
+        *,
+        options=None,
+        result_callback: Callable | None = None,
     ) -> None:
         """Maximize the GG latency M-step and update the latency distribution."""
         log_gg_lower = np.log(1.0e-5)
@@ -645,7 +652,11 @@ class _GeneralizedGammaLatencyOptimizer:
                     None,
                 ),
             ],
+            options=options,
         )
+
+        if result_callback is not None:
+            result_callback(result_gg)
 
         self._validate_result(
             latent_model,

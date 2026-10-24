@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from scipy.spatial.distance import cdist
 from sklearn.base import clone
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.metrics.pairwise import pairwise_kernels
 from sklearn.model_selection import GridSearchCV, KFold
 from sksurv.util import Surv
@@ -166,9 +167,11 @@ def test_matrix_callable_survives_clone_fit_and_prediction(survival_data):
     parameters = {"scale": 0.4}
     original = GGKM(kernel=matrix_rbf, kernel_params=parameters,
                     lambda_reg=0.1, max_em_iter=1)
-    model = clone(original).fit(X, y)
-    expected_model = GGKM(kernel="rbf", gamma=0.4,
-                          lambda_reg=0.1, max_em_iter=1).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = clone(original).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        expected_model = GGKM(kernel="rbf", gamma=0.4,
+                              lambda_reg=0.1, max_em_iter=1).fit(X, y)
 
     np.testing.assert_allclose(model.K_, expected_model.K_)
     np.testing.assert_allclose(model.predict(X[:3]), expected_model.predict(X[:3]))
@@ -184,8 +187,10 @@ def fitted_precomputed_models(survival_data):
     X, y = survival_data
     gram = pairwise_kernels(X, X, metric="rbf", gamma=0.4)
     common = {"lambda_reg": 0.1, "max_em_iter": 1}
-    model = GGKM(kernel="precomputed", **common).fit(gram, y)
-    reference = GGKM(kernel="rbf", gamma=0.4, **common).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GGKM(kernel="precomputed", **common).fit(gram, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        reference = GGKM(kernel="rbf", gamma=0.4, **common).fit(X, y)
     return model, reference
 
 
@@ -231,7 +236,9 @@ def test_precomputed_kernels_support_grid_search_pairwise_slicing(survival_data)
         {"lambda_reg": [0.1, 0.2]},
         cv=KFold(n_splits=2),
         error_score="raise",
-    ).fit(gram, y)
+    )
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        search.fit(gram, y)
 
     assert np.all(np.isfinite(search.cv_results_["mean_test_score"]))
     assert search.predict(gram[:3]).shape == (3,)

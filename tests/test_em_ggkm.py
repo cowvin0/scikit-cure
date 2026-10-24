@@ -6,7 +6,7 @@ equations and gradient differences: stable tail formulas can legitimately alter
 the trajectory of the ill-conditioned latency optimization.
 """
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 from scipy.optimize import minimize as scipy_minimize
 from scipy.special import expit
-from sklearn.exceptions import NotFittedError
+from sklearn.exceptions import ConvergenceWarning, NotFittedError
 from sklearn.metrics.pairwise import pairwise_kernels
 from sksurv.util import Surv
 
@@ -350,7 +350,16 @@ def _run_case(case, model_class, monkeypatch):
     model = model_class(**parameters)
     runs = []
     with _record_optimizers(monkeypatch) as trace:
-        model.fit(X, y)
+        warning_context = (
+            nullcontext()
+            if parameters.get("tol") == 1e6
+            else pytest.warns(
+                ConvergenceWarning,
+                match=f"EM did not converge within {model.max_em_iter} iterations",
+            )
+        )
+        with warning_context:
+            model.fit(X, y)
         _assert_fitted_equations(model, X, y, X_test)
         runs.append(
             {"state": _state(model), "predictions": _predictions(model, X, y, X_test)}
@@ -365,7 +374,11 @@ def _run_case(case, model_class, monkeypatch):
                 "warm_changed_trials": {"K_bin": 3},
             }
             model.set_params(**changes.get(case, {}))
-            model.fit(X, y)
+            with pytest.warns(
+                ConvergenceWarning,
+                match=f"EM did not converge within {model.max_em_iter} iterations",
+            ):
+                model.fit(X, y)
             _assert_fitted_equations(model, X, y, X_test)
             runs.append(
                 {
@@ -385,7 +398,8 @@ def _run_failure(distribution, stage, model_class, monkeypatch):
         max_em_iter=2,
         warm_start=True,
     )
-    model.fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+        model.fit(X, y)
     initial_state = _state(model)
 
     def failed(*args, **kwargs):
@@ -416,7 +430,12 @@ def _run_failure(distribution, stage, model_class, monkeypatch):
             "phi": "_update_phi",
         }[stage]
         monkeypatch.setattr(model, method, failed)
-    with _record_optimizers(monkeypatch) as trace:
+    warning_context = (
+        pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations")
+        if stage == "finalize"
+        else nullcontext()
+    )
+    with _record_optimizers(monkeypatch) as trace, warning_context:
         try:
             model.fit(X, y)
         except Exception as exc:
@@ -542,6 +561,7 @@ def test_ggkm_em_reference(case, em_reference, monkeypatch):
         state = run["state"]
         historical_state = historical["state"]
         parameters = dict(historical_state["constructor_parameters"])
+        parameters.update(em_rtol=0.0, solver_options=None)
         if case.endswith("default_iteration_limit"):
             assert parameters["max_em_iter"] is None
             parameters["max_em_iter"] = 1000
@@ -594,7 +614,10 @@ def test_ggkm_em_failure_state_reference(
     assert observed["initial_state"]["is_fitted"] is True
     state = observed["state"]
     assert state["is_fitted"] is False
-    for field in ("constructor_parameters", "latent_configuration", "n_features_in", "unique_times"):
+    expected_parameters = dict(historical["state"]["constructor_parameters"])
+    expected_parameters.update(em_rtol=0.0, solver_options=None)
+    _assert_reference(state["constructor_parameters"], expected_parameters)
+    for field in ("latent_configuration", "n_features_in", "unique_times"):
         _assert_reference(state[field], historical["state"][field])
     progress = state["fit_state"]
     for field in ("K", "X_train"):

@@ -1,0 +1,5 @@
+# Minimum supported core combination, exercised on Python 3.10.
+numpy==2.0.0
+scipy==1.13.1
+scikit-learn==1.6.1
+scikit-survival==0.25.0

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.metrics.pairwise import pairwise_kernels
 from sksurv.util import Surv
 
@@ -86,7 +87,8 @@ def test_cumulative_hazard_remains_finite_when_survival_underflows(estimator):
     params = {"max_em_iter": 1}
     if estimator is GradientBoostingCure:
         params.update(n_estimators=1, min_samples_leaf=3, random_state=73)
-    model = estimator(**params).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = estimator(**params).fit(X, y)
     model._latency.set_parameters(a=1., d=1., p=1.)
     if isinstance(model, GGKM):
         model.beta0_ = 8.
@@ -112,8 +114,10 @@ def test_cumulative_hazard_remains_finite_when_survival_underflows(estimator):
 def test_linear_fit_is_invariant_to_feature_units(estimator, fit_intercept):
     X, y = _data()
     factors = np.array([1e-6, 1e6])
-    model = estimator(max_em_iter=2, fit_intercept=fit_intercept).fit(X, y)
-    scaled = estimator(max_em_iter=2, fit_intercept=fit_intercept).fit(X * factors, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+        model = estimator(max_em_iter=2, fit_intercept=fit_intercept).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+        scaled = estimator(max_em_iter=2, fit_intercept=fit_intercept).fit(X * factors, y)
     np.testing.assert_allclose(scaled.predict(X * factors), model.predict(X), rtol=2e-5, atol=2e-6)
     np.testing.assert_allclose(scaled.coef_ * factors, model.coef_, rtol=2e-5, atol=2e-6)
     assert scaled.intercept_ == pytest.approx(model.intercept_, rel=2e-5, abs=2e-6)
@@ -139,7 +143,8 @@ def test_semidefinite_kernel_allows_roundoff_negative_eigenvalues():
     gram = pairwise_kernels(X, metric="linear")
     # Rank-deficient linear Gram matrices naturally have tiny negative computed
     # eigenvalues. They remain valid kernels and should not require a nugget.
-    model = GGKM(kernel="precomputed", max_em_iter=1).fit(gram, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GGKM(kernel="precomputed", max_em_iter=1).fit(gram, y)
     assert np.all(np.isfinite(model.predict(gram)))
 
 

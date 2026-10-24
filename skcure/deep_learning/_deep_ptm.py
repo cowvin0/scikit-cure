@@ -214,7 +214,8 @@ class DeepPromotionTimeCure(BaseCureEstimator):
             raise ImportError(
                 "DeepPromotionTimeCure requires TensorFlow and DeepCure. "
                 "Install the optional dependencies with "
-                "`pip install -e '.[deep-learning]'` from the project checkout."
+                "`pip install -r requirements-deep-learning.txt` from the project "
+                "checkout, which installs the tested DeepCure revision."
             ) from exc
         return tf, DeepPTM
 
@@ -521,6 +522,10 @@ class DeepPromotionTimeCure(BaseCureEstimator):
         if np.any(log_theta > _maximum_log_float()):
             raise FloatingPointError("Predicted latent mean exceeds double precision.")
         return _safe_exp(log_theta)
+
+    def predict_latent_mean(self, X) -> np.ndarray:
+        """Return the expected latent count under the fitted neural link."""
+        return self.predict_theta(X)
 
     def predict_cure_probability(self, X) -> np.ndarray:
         """Return the limiting population survival probability, exp(-theta)."""

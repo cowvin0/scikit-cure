@@ -17,6 +17,15 @@ class MixtureCure(_BaseLinearCureModel):
     its optimizer are the same components used by GGKM and GradientBoostingCure.
     Incidence optimization scales its coordinates internally; fitted
     coefficients and predictions retain the original feature units.
+
+    ``tol`` controls absolute outer EM convergence; keyword-only ``em_rtol``
+    enables relative convergence (default 0). ``solver_options`` independently
+    configures inner L-BFGS-B stages: for example,
+    ``{"incidence": {"gtol": 1e-7}, "latency": {"maxiter": 200}}``.
+    Supported options are ftol, gtol, maxiter, maxfun, maxls, and maxcor.
+    Fits expose ``termination_reason_`` and compact ``optimizer_results_``.
+    With ``warm_start=True``, fitted latency parameters are reused; incidence
+    coefficients are initialized again for each fit.
     """
 
     _latent_model = _BinomialLatentModel(K_bin=1)
@@ -34,6 +43,9 @@ class MixtureCure(_BaseLinearCureModel):
         tol=1e-6,
         max_em_iter=1000,
         warm_start=False,
+        *,
+        em_rtol=0.0,
+        solver_options=None,
     ):
         self.a = a
         self.d = d
@@ -42,6 +54,8 @@ class MixtureCure(_BaseLinearCureModel):
         self.tol = tol
         self.max_em_iter = max_em_iter
         self.warm_start = warm_start
+        self.em_rtol = em_rtol
+        self.solver_options = solver_options
 
     def _make_latent_model(self):
         return _BinomialLatentModel(K_bin=1)
@@ -59,6 +73,15 @@ class PromotionTimeCure(_BaseLinearCureModel):
     and the shared latency optimizer are reused directly.
     Incidence optimization scales its coordinates internally; fitted
     coefficients and predictions retain the original feature units.
+
+    ``tol`` controls absolute outer EM convergence; keyword-only ``em_rtol``
+    enables relative convergence (default 0). ``solver_options`` independently
+    configures inner L-BFGS-B stages: for example,
+    ``{"incidence": {"gtol": 1e-7}, "latency": {"maxiter": 200}}``.
+    Supported options are ftol, gtol, maxiter, maxfun, maxls, and maxcor.
+    Fits expose ``termination_reason_`` and compact ``optimizer_results_``.
+    With ``warm_start=True``, fitted latency parameters are reused; incidence
+    coefficients are initialized again for each fit.
     """
 
     _latent_model = _PoissonLatentModel()
@@ -77,6 +100,9 @@ class PromotionTimeCure(_BaseLinearCureModel):
         tol=1e-6,
         max_em_iter=1000,
         warm_start=False,
+        *,
+        em_rtol=0.0,
+        solver_options=None,
     ):
         self.a = a
         self.d = d
@@ -85,6 +111,8 @@ class PromotionTimeCure(_BaseLinearCureModel):
         self.tol = tol
         self.max_em_iter = max_em_iter
         self.warm_start = warm_start
+        self.em_rtol = em_rtol
+        self.solver_options = solver_options
 
     def _make_latent_model(self):
         return _PoissonLatentModel()

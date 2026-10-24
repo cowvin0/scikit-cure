@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from sklearn.base import clone
-from sklearn.exceptions import NotFittedError
+from sklearn.exceptions import ConvergenceWarning, NotFittedError
 from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -65,9 +65,10 @@ def test_fitted_family_supports_clone_and_pickle(
     distribution, parameters, survival_data
 ):
     X, y = survival_data
-    model = GradientBoostingCure(
-        latent_distribution=distribution, **parameters, **SHORT_FIT
-    ).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GradientBoostingCure(
+            latent_distribution=distribution, **parameters, **SHORT_FIT
+        ).fit(X, y)
     if distribution == "negative_binomial":
         assert model.phi_ > 0
         if parameters["phi"] is not None:
@@ -108,7 +109,8 @@ def test_unified_tree_updates_match_independent_legacy_fixture(
     )
     monkeypatch.setattr(model, "_gg_m_step", lambda *args, **kwargs: None)
     monkeypatch.setattr(model, "_phi_m_step", lambda *args, **kwargs: None)
-    model.fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 3 iterations"):
+        model.fit(X, y)
     expected = case["fixed_gg_steps"]
     np.testing.assert_allclose(model.predict_eta(X), expected["eta"], rtol=0, atol=1e-6)
     np.testing.assert_allclose(
@@ -135,10 +137,12 @@ def test_distribution_aliases_preserve_constructor_parameter(
     alias, canonical, survival_data
 ):
     X, y = survival_data
-    model = GradientBoostingCure(latent_distribution=alias, **SHORT_FIT).fit(X, y)
-    expected = GradientBoostingCure(
-        latent_distribution=canonical, **SHORT_FIT
-    ).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GradientBoostingCure(latent_distribution=alias, **SHORT_FIT).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        expected = GradientBoostingCure(
+            latent_distribution=canonical, **SHORT_FIT
+        ).fit(X, y)
     assert model.latent_distribution == alias
     assert clone(model).latent_distribution == alias
     np.testing.assert_array_equal(
@@ -158,9 +162,10 @@ def test_parameters_for_other_latent_families_are_ignored(
     distribution, parameters, survival_data
 ):
     X, y = survival_data
-    model = GradientBoostingCure(
-        latent_distribution=distribution, **parameters, **SHORT_FIT
-    ).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GradientBoostingCure(
+            latent_distribution=distribution, **parameters, **SHORT_FIT
+        ).fit(X, y)
     assert np.isfinite(model.predict(X)).all()
     for name, value in parameters.items():
         assert model.get_params()[name] == value
@@ -212,9 +217,10 @@ def test_unified_predictions_require_fitting(method, args):
 
 def test_prediction_uses_fitted_family_after_set_params(survival_data):
     X, y = survival_data
-    model = GradientBoostingCure(
-        latent_distribution="nb", phi=0.7, **SHORT_FIT
-    ).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GradientBoostingCure(
+            latent_distribution="nb", phi=0.7, **SHORT_FIT
+        ).fit(X, y)
     times = np.array([0.0, 0.5, 2.0])
     before = (
         model.predict_theta(X),
@@ -229,10 +235,12 @@ def test_prediction_uses_fitted_family_after_set_params(survival_data):
     )
     for old, new in zip(before, after):
         np.testing.assert_array_equal(old, new)
-    model.fit(X, y)
-    expected = GradientBoostingCure(
-        latent_distribution="binomial", K_bin=3, **SHORT_FIT
-    ).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model.fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        expected = GradientBoostingCure(
+            latent_distribution="binomial", K_bin=3, **SHORT_FIT
+        ).fit(X, y)
     np.testing.assert_array_equal(
         model.predict_survival(X, times), expected.predict_survival(X, times)
     )
@@ -245,15 +253,17 @@ def test_warm_start_reuses_latency_and_dispersion_but_rebuilds_trees(
     warm_start, monkeypatch, survival_data
 ):
     X, y = survival_data
-    model = GradientBoostingCure(
-        latent_distribution="nb", warm_start=warm_start, **SHORT_FIT
-    ).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GradientBoostingCure(
+            latent_distribution="nb", warm_start=warm_start, **SHORT_FIT
+        ).fit(X, y)
     gamma = (model.a_, model.d_, model.p_)
     phi = model.phi_
     trees = list(model.models_)
     monkeypatch.setattr(model, "_gg_m_step", lambda *args, **kwargs: None)
     monkeypatch.setattr(model, "_phi_m_step", lambda *args, **kwargs: None)
-    model.fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model.fit(X, y)
     np.testing.assert_array_equal(
         (model.a_, model.d_, model.p_), gamma if warm_start else (1.0, 1.0, 1.0)
     )
@@ -266,21 +276,26 @@ def test_warm_start_resets_dispersion_when_latent_configuration_changes(
     monkeypatch, survival_data
 ):
     X, y = survival_data
-    model = GradientBoostingCure(
-        latent_distribution="nb", warm_start=True, **SHORT_FIT
-    ).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GradientBoostingCure(
+            latent_distribution="nb", warm_start=True, **SHORT_FIT
+        ).fit(X, y)
     monkeypatch.setattr(model, "_gg_m_step", lambda *args, **kwargs: None)
     monkeypatch.setattr(model, "_phi_m_step", lambda *args, **kwargs: None)
-    model.set_params(phi=0.7).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model.set_params(phi=0.7).fit(X, y)
     assert model.phi_ == 0.7
     assert model.estimate_phi_ is False
-    model.set_params(phi=None).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model.set_params(phi=None).fit(X, y)
     assert model.phi_ == 0.5
     assert model.estimate_phi_ is True
-    model.set_params(latent_distribution="poisson").fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model.set_params(latent_distribution="poisson").fit(X, y)
     with pytest.raises(AttributeError):
         _ = model.phi_
-    model.set_params(latent_distribution="nb").fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model.set_params(latent_distribution="nb").fit(X, y)
     assert model.phi_ == 0.5
 
 
@@ -288,15 +303,17 @@ def test_unified_estimator_supports_pipeline_and_family_grid_search(survival_dat
     X, y = survival_data
     frame = pd.DataFrame(X, columns=["first", "second"])
     pipeline = make_pipeline(StandardScaler(), GradientBoostingCure(**SHORT_FIT))
-    search = GridSearchCV(
-        pipeline,
-        {"gradientboostingcure__latent_distribution": ["poisson", "binomial"]},
-        cv=KFold(2),
-        error_score="raise",
-    ).fit(frame, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        search = GridSearchCV(
+            pipeline,
+            {"gradientboostingcure__latent_distribution": ["poisson", "binomial"]},
+            cv=KFold(2),
+            error_score="raise",
+        ).fit(frame, y)
     assert np.isfinite(search.cv_results_["mean_test_score"]).all()
     assert np.isfinite(search.predict(frame)).all()
-    direct = GradientBoostingCure(**SHORT_FIT).fit(frame, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        direct = GradientBoostingCure(**SHORT_FIT).fit(frame, y)
     np.testing.assert_array_equal(direct.feature_names_in_, frame.columns)
     with pytest.raises(ValueError, match="feature"):
         direct.predict(frame[["second", "first"]])
@@ -312,7 +329,8 @@ def test_omitted_em_limit_uses_public_constructor_default(survival_data):
 
 def test_invalid_family_on_refit_invalidates_previous_fit(survival_data):
     X, y = survival_data
-    model = GradientBoostingCure(**SHORT_FIT).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GradientBoostingCure(**SHORT_FIT).fit(X, y)
     model.set_params(latent_distribution="unknown")
     with pytest.raises(ValueError, match="latent_distribution"):
         model.fit(X, y)

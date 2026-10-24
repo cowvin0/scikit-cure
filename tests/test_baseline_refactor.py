@@ -3,11 +3,12 @@
 import importlib
 import importlib.util
 import pickle
+from contextlib import nullcontext
 
 import numpy as np
 import pytest
 from sklearn.base import clone
-from sklearn.exceptions import NotFittedError
+from sklearn.exceptions import ConvergenceWarning, NotFittedError
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.validation import check_is_fitted
@@ -161,7 +162,16 @@ def test_linear_baseline_fit_and_refit_invariants(family, case):
     parameters.update(_cases()[case])
     model = model_class(**parameters)
 
-    returned = model.fit(X, y)
+    expected_warning = (
+        nullcontext()
+        if case in {"early_convergence", "default_iteration_limit"}
+        else pytest.warns(
+            ConvergenceWarning,
+            match=f"EM did not converge within {model.max_em_iter} iterations",
+        )
+    )
+    with expected_warning:
+        returned = model.fit(X, y)
     assert returned is model
     assert isinstance(model._latent_model, latent_class)
     _assert_valid_fit(model, X, y, X_test)
@@ -183,7 +193,11 @@ def test_linear_baseline_fit_and_refit_invariants(family, case):
         assert model.intercept_ == 0.0
 
     if "refit" in case or case == "warm_no_intercept":
-        returned = model.fit(X, y)
+        with pytest.warns(
+            ConvergenceWarning,
+            match=f"EM did not converge within {model.max_em_iter} iterations",
+        ):
+            returned = model.fit(X, y)
         assert returned is model
         assert isinstance(model._latent_model, latent_class)
         _assert_valid_fit(model, X, y, X_test)
@@ -249,7 +263,7 @@ def test_fit_routes_latency_update_through_shared_optimizer(family, monkeypatch)
     original = optimizer.maximize
     calls = []
 
-    def wrapped(latency, latent_model, objective, t, delta, expected):
+    def wrapped(latency, latent_model, objective, t, delta, expected, **kwargs):
         calls.append((latency, latent_model, objective.__name__))
         return original(
             latency,
@@ -258,12 +272,14 @@ def test_fit_routes_latency_update_through_shared_optimizer(family, monkeypatch)
             t,
             delta,
             expected,
+            **kwargs,
         )
 
     monkeypatch.setattr(optimizer, "maximize", wrapped)
 
     X, y = _data()
-    model.fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model.fit(X, y)
 
     assert len(calls) == 1
     latency, latent_model, objective_name = calls[0]
@@ -294,8 +310,14 @@ def test_callback_failures_propagate(family, stage, method, monkeypatch):
 
     monkeypatch.setattr(model, method, failed)
 
-    with pytest.raises(ArithmeticError, match="injected " + stage + " failure"):
-        model.fit(X, y)
+    expected_warning = (
+        pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations")
+        if stage == "finalize"
+        else nullcontext()
+    )
+    with expected_warning:
+        with pytest.raises(ArithmeticError, match="injected " + stage + " failure"):
+            model.fit(X, y)
 
 
 @pytest.mark.parametrize("family", MODEL_INFO)
@@ -391,7 +413,8 @@ def test_linear_estimator_clone_and_pipeline(family):
     model = model_class(a=1.2, d=0.9, p=1.1, max_em_iter=1)
     X, y = _data()
     pipeline = make_pipeline(StandardScaler(), model)
-    assert pipeline.fit(X, y) is pipeline
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        assert pipeline.fit(X, y) is pipeline
     assert np.isfinite(pipeline.score(X, y))
     np.testing.assert_array_equal(
         pipeline.predict(X), model.predict(pipeline[0].transform(X))
@@ -408,7 +431,8 @@ def test_fitted_pickle_preserves_composed_components(family):
     model_class, latent_class = MODEL_INFO[family]
     X, y = _data()
     X_test = X[:3]
-    model = model_class(max_em_iter=1).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = model_class(max_em_iter=1).fit(X, y)
 
     restored = pickle.loads(pickle.dumps(model))
 

@@ -14,7 +14,7 @@ from skcure.distributions import (
     GeneralizedGamma,
     validate_latency_distribution,
 )
-from skcure._em import fit_ggkm_em
+from skcure._em import fit_ggkm_em, _solver_options, _record_optimizer_result
 from skcure._latency import _GeneralizedGammaLatencyOptimizer
 from skcure._latent import (
     _BinomialLatentModel,
@@ -81,6 +81,14 @@ class GGKM(BaseCureEstimator):
         Positive absolute log-likelihood tolerance for EM convergence.
     max_em_iter : int, default=1000
         Maximum number of EM iterations. Must be a positive integer.
+    em_rtol : float, default=0.0
+        Optional non-negative relative log-likelihood convergence tolerance.
+        A decreasing likelihood is never declared converged.
+    solver_options : mapping or None, default=None
+        Independent L-BFGS-B options for ``incidence``, ``latency``, and
+        ``dispersion`` M-steps. Each value is a mapping containing any of
+        ``ftol``, ``gtol``, ``maxiter``, ``maxfun``, ``maxls``, or ``maxcor``.
+        These control inner optimizations separately from EM stopping.
 
     Attributes
     ----------
@@ -106,6 +114,11 @@ class GGKM(BaseCureEstimator):
         Penalized log-likelihood after each EM iteration.
     final_loglik_ : float
         Final penalized log-likelihood.
+    termination_reason_ : str
+        ``"converged"``, ``"max_em_iter"``, or ``"failed"``.
+    optimizer_results_ : list of dict
+        Inner optimizer stages, iteration numbers, status, objective, and
+        evaluation counts, including unsuccessful attempts.
     """
 
     _POISSON = "poisson"
@@ -146,6 +159,9 @@ class GGKM(BaseCureEstimator):
         warm_start=False,
         tol=1e-6,
         max_em_iter=1000,
+        *,
+        em_rtol=0.0,
+        solver_options=None,
     ):
         self.latent_distribution = latent_distribution
         self.a = a
@@ -163,6 +179,8 @@ class GGKM(BaseCureEstimator):
         self.warm_start = warm_start
         self.tol = tol
         self.max_em_iter = max_em_iter
+        self.em_rtol = em_rtol
+        self.solver_options = solver_options
 
     @classmethod
     def _normalize_latent_distribution(
@@ -220,6 +238,8 @@ class GGKM(BaseCureEstimator):
         self.converged_ = False
         self.n_iter_ = 0
         self.final_loglik_: float | None = None
+        self.termination_reason_ = "running"
+        self.optimizer_results_: list[dict] = []
 
     @property
     def estimate_phi(self) -> bool:
@@ -573,6 +593,10 @@ class GGKM(BaseCureEstimator):
             eta,
             t,
             delta,
+            options=_solver_options(self, "dispersion"),
+            result_callback=lambda result: _record_optimizer_result(
+                self, "dispersion", result
+            ),
         )
 
     def _initial_beta0(
@@ -601,6 +625,14 @@ class GGKM(BaseCureEstimator):
         """
         was_fitted = self.__sklearn_is_fitted__()
         self._is_fitted = False
+        self._reset_fit_results()
+        try:
+            return self._fit(X, y, was_fitted=was_fitted)
+        except Exception:
+            self.termination_reason_ = "failed"
+            raise
+
+    def _fit(self, X, y, *, was_fitted) -> GGKM:
         latent_model = self._validate_parameters_for_fit()
         X, event, t = self._validate_fit_data(X, y)
         delta = event.astype(float)
@@ -613,7 +645,6 @@ class GGKM(BaseCureEstimator):
         if not reuse or configuration != self._latent_configuration:
             self._latent_model = latent_model
         self._latent_configuration = configuration
-        self._reset_fit_results()
         if not reuse:
             self._reset_parameters_for_fit()
 
@@ -664,6 +695,15 @@ class GGKM(BaseCureEstimator):
 
         eta = self._predict_eta_from_validated_X(X)
         return self._latent_model.predict_theta_from_eta(eta)
+
+    def predict_latent_mean(self, X) -> np.ndarray:
+        """Return E[N | X] for every supported latent-count distribution.
+
+        Poisson and negative-binomial means are exp(eta). The binomial mean
+        is K_bin * expit(eta), including Bernoulli susceptibility when K_bin=1.
+        """
+        eta = self.predict_eta(X)
+        return self._latent_model.predict_latent_mean_from_eta(eta)
 
     def predict_survival(self, X, times) -> np.ndarray:
         """Return continuous survival probabilities of shape (n_samples, n_times).

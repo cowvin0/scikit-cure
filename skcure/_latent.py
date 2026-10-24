@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -92,8 +93,8 @@ class _LatentCountModel(ABC):
 
     Fit lifecycle hooks have no-op defaults because only stateful count
     families, currently the negative-binomial model, need to override them.
-    ``predict_theta_from_eta`` is intentionally optional because a common
-    latent-mean interpretation is not available for every count family.
+    ``predict_latent_mean_from_eta`` consistently returns E[N | X], while
+    ``predict_theta_from_eta`` retains its historical family-specific meaning.
     """
 
     name: ClassVar[str]
@@ -159,6 +160,15 @@ class _LatentCountModel(ABC):
         raise RuntimeError(
             "predict_theta is defined only for " "latent_distribution='poisson'."
         )
+
+    def predict_latent_mean_from_eta(self, eta: np.ndarray) -> np.ndarray:
+        """Return the unconditional mean for log-mean count predictors."""
+        eta = np.asarray(eta, dtype=float)
+        if np.any(~np.isfinite(eta)):
+            raise FloatingPointError("Non-finite latent-count predictor.")
+        if np.any(eta > _maximum_log_float()):
+            raise FloatingPointError("Predicted latent mean exceeds double precision.")
+        return np.exp(eta)
 
     @abstractmethod
     def predict_log_survival_from_eta(
@@ -611,6 +621,9 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
         const,
         log_A,
         delta,
+        *,
+        options=None,
+        result_callback: Callable | None = None,
     ):
         """Update phi in log coordinates using the historical GGKM path."""
         log_phi_lower = np.log(1.0e-8)
@@ -634,7 +647,11 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
                     None,
                 )
             ],
+            options=options,
         )
+
+        if result_callback is not None:
+            result_callback(result_phi)
 
         if (
             not result_phi.success
@@ -670,6 +687,11 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
                 "an invalid phi."
             )
 
+        self._validate_dispersion_candidate(phi_new, const, log_A, delta)
+        self.phi = phi_new
+
+    def _validate_dispersion_candidate(self, phi_new, const, log_A, delta):
+        """Require a finite non-worsening observed-likelihood dispersion step."""
         value, gradient = self.phi_value_and_grad(
             np.array([phi_new]), const, log_A, delta
         )
@@ -677,8 +699,18 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
             raise FloatingPointError(
                 "Dispersion optimization returned an invalid objective."
             )
-
-        self.phi = phi_new
+        initial_value, initial_gradient = self.phi_value_and_grad(
+            np.array([self.phi]), const, log_A, delta
+        )
+        if not np.isfinite(initial_value) or np.any(~np.isfinite(initial_gradient)):
+            raise FloatingPointError(
+                "Dispersion optimization started from an invalid objective."
+            )
+        tolerance = 64.0 * np.finfo(float).eps * (1.0 + abs(initial_value))
+        if value > initial_value + tolerance:
+            raise FloatingPointError(
+                "Dispersion optimization returned a worsening objective."
+            )
 
     def update_after_latency_from_eta(
         self,
@@ -686,6 +718,9 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
         eta,
         t,
         delta,
+        *,
+        options=None,
+        result_callback: Callable | None = None,
     ):
         """Update dispersion for a fixed incidence predictor."""
         if not self.estimate_phi:
@@ -717,7 +752,11 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
                     None,
                 )
             ],
+            options=options,
         )
+
+        if result_callback is not None:
+            result_callback(result_phi)
 
         if (
             result_phi.success
@@ -732,24 +771,12 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
                 const,
                 log_A,
                 delta,
+                options=options,
+                result_callback=result_callback,
             )
             phi_new = self.phi
 
-        value, gradient = self.phi_value_and_grad(
-            np.array(
-                [phi_new],
-                dtype=float,
-            ),
-            const,
-            log_A,
-            delta,
-        )
-
-        if not np.isfinite(value) or np.any(~np.isfinite(gradient)):
-            raise FloatingPointError(
-                "Dispersion optimization returned an invalid objective."
-            )
-
+        self._validate_dispersion_candidate(phi_new, const, log_A, delta)
         self.phi = phi_new
 
     def update_after_latency_in_log_space_from_eta(
@@ -758,6 +785,9 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
         eta,
         t,
         delta,
+        *,
+        options=None,
+        result_callback: Callable | None = None,
     ):
         """Update dispersion in log space for a fixed incidence predictor."""
         if not self.estimate_phi:
@@ -774,6 +804,8 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
             const,
             log_A,
             delta,
+            options=options,
+            result_callback=result_callback,
         )
 
     def finalize_fit(self):
@@ -817,6 +849,13 @@ class _BinomialLatentModel(_LatentCountModel):
     K_bin: int
 
     name = "binomial"
+
+    def predict_latent_mean_from_eta(self, eta: np.ndarray) -> np.ndarray:
+        """Return K times the binomial success probability."""
+        eta = np.asarray(eta, dtype=float)
+        if np.any(~np.isfinite(eta)):
+            raise FloatingPointError("Non-finite latent-count predictor.")
+        return self.K_bin * expit(eta)
     _e_step_predictor_error = "Non-finite binomial predictor."
 
     @staticmethod

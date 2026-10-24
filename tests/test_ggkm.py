@@ -9,7 +9,7 @@ import pytest
 from scipy.special import expit, gammainc
 from scipy.spatial.distance import cdist
 from sklearn.base import BaseEstimator, clone
-from sklearn.exceptions import NotFittedError
+from sklearn.exceptions import ConvergenceWarning, NotFittedError
 from sklearn.model_selection import GridSearchCV, KFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -50,7 +50,8 @@ def survival_data():
 @pytest.fixture(scope="module")
 def fitted_model(survival_data):
     X, y = survival_data
-    return GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=2).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+        return GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=2).fit(X, y)
 
 
 def test_ggkm_is_defined_in_its_public_module():
@@ -139,7 +140,8 @@ def test_fit_returns_self_and_keeps_constructor_parameters(survival_data):
         max_em_iter=2,
     )
     original_params = model.get_params().copy()
-    assert model.fit(X, y) is model
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+        assert model.fit(X, y) is model
     assert model.get_params() == original_params
     assert model.a_ > 0 and model.d_ > 0 and model.p_ > 0
     assert model.phi is None
@@ -231,7 +233,8 @@ def test_target_field_names_are_not_hardcoded(survival_data):
     custom_y = Surv.from_arrays(
         y["event"], y["time"], name_event="observed", name_time="duration"
     )
-    model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, custom_y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, custom_y)
     expected = concordance_index_censored(
         custom_y["observed"], custom_y["duration"], model.predict(X)
     )[0]
@@ -241,7 +244,8 @@ def test_target_field_names_are_not_hardcoded(survival_data):
 def test_feature_names_are_recorded_and_validated(survival_data):
     X, y = survival_data
     frame = pd.DataFrame(X, columns=["age", "biomarker"])
-    model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(frame, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(frame, y)
     np.testing.assert_array_equal(model.feature_names_in_, frame.columns)
     assert model.predict(frame).shape == (len(frame),)
     with pytest.raises(ValueError, match="feature names"):
@@ -330,7 +334,9 @@ def test_pipeline_and_grid_search_use_survival_score(survival_data):
         {"ggkm__lambda_reg": [0.1, 0.2]},
         cv=KFold(n_splits=2),
         error_score="raise",
-    ).fit(X, y)
+    )
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        search.fit(X, y)
     assert np.all(np.isfinite(search.cv_results_["mean_test_score"]))
     assert search.predict(X[:3]).shape == (3,)
     assert 0.0 <= search.score(X, y) <= 1.0
@@ -390,13 +396,14 @@ def test_population_survival_matches_latent_count_distribution(
     survival_data,
 ):
     X, y = survival_data
-    model = GGKM(
-        latent_distribution=distribution,
-        gamma=0.3,
-        lambda_reg=0.1,
-        max_em_iter=2,
-        **kwargs,
-    ).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+        model = GGKM(
+            latent_distribution=distribution,
+            gamma=0.3,
+            lambda_reg=0.1,
+            max_em_iter=2,
+            **kwargs,
+        ).fit(X, y)
     times = np.array([0.0, 0.5, 1.5, 3.0, 5.0])
     F = gammainc(model.d_ / model.p_, (times / model.a_) ** model.p_)
     eta = model.predict(X[:3])[:, None]
@@ -431,14 +438,15 @@ def test_refit_initializes_gamma_and_dispersion_as_requested(
     monkeypatch,
 ):
     X, y = survival_data
-    model = GGKM(
-        latent_distribution="negative_binomial",
-        phi=phi,
-        warm_start=warm_start,
-        gamma=0.3,
-        lambda_reg=0.1,
-        max_em_iter=1,
-    ).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GGKM(
+            latent_distribution="negative_binomial",
+            phi=phi,
+            warm_start=warm_start,
+            gamma=0.3,
+            lambda_reg=0.1,
+            max_em_iter=1,
+        ).fit(X, y)
     previous_gamma = [model.a_, model.d_, model.p_]
     previous_phi = model.phi_
     model.set_params(a=1.2, d=1.4, p=1.1)
@@ -470,7 +478,8 @@ def test_invalid_prediction_times_are_rejected(fitted_model, survival_data, time
 @pytest.mark.parametrize("wrong_feature_count", [False, True])
 def test_failed_refit_invalidates_predictions(survival_data, wrong_feature_count):
     X, y = survival_data
-    model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, y)
     invalid_X = np.ones((len(y), 3)) if wrong_feature_count else X
     with pytest.raises(ValueError):
         model.fit(invalid_X, y[:-1])
@@ -482,7 +491,8 @@ def test_failed_refit_invalidates_predictions(survival_data, wrong_feature_count
 
 def test_failed_optimization_invalidates_predictions(survival_data, monkeypatch):
     X, y = survival_data
-    model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, y)
 
     def failed_e_step(*args):
         raise FloatingPointError("Synthetic optimizer failure")
@@ -499,7 +509,8 @@ def test_failed_refit_with_changed_parameters_invalidates_predictions(
     survival_data, params
 ):
     X, y = survival_data
-    model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1).fit(X, y)
     model.set_params(**params)
     with pytest.raises(ValueError):
         model.fit(X, y)
@@ -510,9 +521,10 @@ def test_failed_refit_with_changed_parameters_invalidates_predictions(
 def test_research_adapter_fits_ggkm_and_moves_solver_settings(survival_data):
     X, y = survival_data
     model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=5)
-    fitted = _fit_cure_model(
-        model, X, y["time"], y["event"].astype(float), max_em_iter=1, tol=1e-5
-    )
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        fitted = _fit_cure_model(
+            model, X, y["time"], y["event"].astype(float), max_em_iter=1, tol=1e-5
+        )
     assert fitted is model
     assert model.max_em_iter == 1
     assert model.tol == 1e-5
@@ -693,14 +705,15 @@ def test_fixed_kernel_fit_improves_legacy_likelihood_and_matches_count_formulas(
     # of rounding differences between SciPy's and sklearn's RBF distances.
     K = np.exp(-0.3 * cdist(X, X, metric="sqeuclidean"))
     K_new = np.exp(-0.3 * cdist(X[:3], X, metric="sqeuclidean"))
-    model = GGKM(
-        latent_distribution=expected["distribution"],
-        gamma=0.3,
-        kernel="precomputed",
-        lambda_reg=0.1,
-        max_em_iter=2,
-        **expected["kwargs"],
-    ).fit(K, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+        model = GGKM(
+            latent_distribution=expected["distribution"],
+            gamma=0.3,
+            kernel="precomputed",
+            lambda_reg=0.1,
+            max_em_iter=2,
+            **expected["kwargs"],
+        ).fit(K, y)
     times = np.array([0.0, 0.5, 1.5, 3.0, 5.0])
     eta = model.beta0_ + K_new @ model.alpha_
     with np.errstate(over="ignore"):

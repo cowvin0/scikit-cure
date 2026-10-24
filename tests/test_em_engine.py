@@ -1,9 +1,11 @@
 """Contracts for the shared, model-independent EM iteration driver."""
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from sklearn.exceptions import ConvergenceWarning
 
 from skcure._em import run_em
 
@@ -32,15 +34,16 @@ def test_ordered_m_steps_receive_latest_parameters_and_one_shared_expectation():
         calls.append(("second", parameters, expectation))
         return 2 * parameters
 
-    parameters, final_loglik = run_em(
-        1,
-        e_step=e_step,
-        m_steps=(first_m_step, second_m_step),
-        loglikelihood=loglikelihood,
-        state=state,
-        tol=0.0,
-        max_iter=2,
-    )
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+        parameters, final_loglik = run_em(
+            1,
+            e_step=e_step,
+            m_steps=(first_m_step, second_m_step),
+            loglikelihood=loglikelihood,
+            state=state,
+            tol=0.0,
+            max_iter=2,
+        )
 
     assert parameters == 64
     assert final_loglik == 64.0
@@ -106,15 +109,19 @@ def test_normal_missing_data_em_can_use_dictionary_parameters():
 )
 def test_stopping_rules(tol, max_iter, expected_history, converged):
     state = _state()
-    parameters, final_loglik = run_em(
-        0,
-        e_step=lambda parameters: None,
-        m_steps=(lambda parameters, expectation: parameters + 1,),
-        loglikelihood=float,
-        state=state,
-        tol=tol,
-        max_iter=max_iter,
+    expectation = nullcontext() if converged else pytest.warns(
+        ConvergenceWarning, match=f"EM did not converge within {max_iter} iterations"
     )
+    with expectation:
+        parameters, final_loglik = run_em(
+            0,
+            e_step=lambda parameters: None,
+            m_steps=(lambda parameters, expectation: parameters + 1,),
+            loglikelihood=float,
+            state=state,
+            tol=tol,
+            max_iter=max_iter,
+        )
 
     assert state.loglik_history == expected_history
     assert state.n_iter == len(expected_history)
@@ -176,7 +183,8 @@ def test_initial_validator_runs_once_before_the_first_iteration(reject_initial):
         assert state.loglik_history == []
         assert not state.converged
     else:
-        run_em(0, **arguments)
+        with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+            run_em(0, **arguments)
         assert calls == [
             ("likelihood", 0),
             ("validate", 0.0),

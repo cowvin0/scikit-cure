@@ -192,6 +192,7 @@ def test_probability_and_survival_contract(
     np.testing.assert_allclose(model.predict(X[:4]), eta)
     np.testing.assert_allclose(model.predict_eta(X[:4]), eta)
     np.testing.assert_allclose(model.predict_theta(X[:4]), theta)
+    np.testing.assert_allclose(model.predict_latent_mean(X[:4]), theta)
     np.testing.assert_allclose(model.predict_cure_probability(X[:4]), cure)
     observed = model.predict_survival(X[:4], times)
     np.testing.assert_allclose(observed, expected, rtol=1e-13, atol=1e-15)

@@ -25,14 +25,15 @@ probability and survival over time.
 
 `GGKM` and `GradientBoostingCure` select Poisson, negative binomial, or binomial
 latent counts through `latent_distribution`. For boosting, `n_estimators` is
-the maximum number of trees added per EM iteration.
+the maximum number of trees added per EM iteration; `max_total_estimators`
+limits the full fit (default 1000).
 
 ## Requirements
 
-Python 3.10 or later, NumPy, SciPy, scikit-learn, scikit-survival, and JAX.
+Python 3.10 or later, NumPy 2.0+, SciPy 1.13+, scikit-learn, and scikit-survival.
 Dependency versions are specified in [pyproject.toml](pyproject.toml).
 `DeepPromotionTimeCure` additionally requires TensorFlow and DeepCure, available
-through the optional `deep-learning` extra.
+through the [optional installation](docs/installation.md). JAX is optional.
 
 ## Installation
 
@@ -45,7 +46,7 @@ python -m pip install .
 To include the optional neural model dependencies:
 
 ```bash
-python -m pip install '.[deep-learning]'
+python -m pip install -r requirements-deep-learning.txt
 ```
 
 ## Example
@@ -81,6 +82,11 @@ index. Survival and cumulative-hazard functions follow scikit-survival's
 `StepFunction` interface. Set `return_array=True` to obtain values on the
 training grid, `unique_times_`.
 
+See the [user guide](docs/README.md) for prediction meanings, fitting controls,
+assumptions, and observed-data evaluation. A runnable
+[evaluation example](examples/evaluation.py) and a
+[simulation benchmark](benchmarks/simulation.py) are included.
+
 The example uses a small iteration budget for demonstration. For an analysis,
 tune the solver settings and evaluate performance on held-out data.
 
@@ -88,6 +94,7 @@ tune the solver settings and evaluate performance on held-out data.
 
 Use [GitHub Issues](https://github.com/cowvin0/scikit-cure/issues) for bug reports
 and questions. Contributions through pull requests are welcome.
+See the [contributing guide](CONTRIBUTING.md) and [release notes](CHANGELOG.md).
 For survival targets, metrics, and API conventions, see the
 [scikit-survival documentation](https://scikit-survival.readthedocs.io/).
 
@@ -106,3 +113,6 @@ python -m pytest
 - Medina-Olivares, V., Lessmann, S., and Klein, N. (2023).
   [The Deep Promotion Time Cure Model](https://arxiv.org/abs/2305.11575).
   *arXiv:2305.11575*.
+
+Software citation metadata is provided in [CITATION.cff](CITATION.cff).
+scikit-cure is licensed under [GPL-3.0-or-later](LICENSE).

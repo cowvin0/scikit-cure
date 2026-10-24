@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,28 +8,60 @@ version = "0.1.0.dev0"
 description = "Cure models with the scikit-survival estimator API"
 readme = "README.md"
 requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{name = "scikit-cure contributors"}]
+keywords = ["survival-analysis", "cure-models", "scikit-learn"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
-    "numpy",
-    "scipy",
+    "numpy>=2.0",
+    "scipy>=1.13",
     "scikit-learn>=1.6",
     "scikit-survival>=0.25",
-    "jax",
 ]
+
+[project.urls]
+Homepage = "https://github.com/cowvin0/scikit-cure"
+Repository = "https://github.com/cowvin0/scikit-cure"
+Issues = "https://github.com/cowvin0/scikit-cure/issues"
+Documentation = "https://github.com/cowvin0/scikit-cure/tree/main/docs"
+Changelog = "https://github.com/cowvin0/scikit-cure/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 deep-learning = [
     "tensorflow>=2.16",
-    "deepcure @ git+https://github.com/vhmedina/deepcure.git@4cb1dd2ba0a603c9b93c8584620b1488df12621b",
     "numba",
     "pandas",
 ]
+jax = ["jax>=0.4.30"]
 dev = [
     "pytest>=8",
     "build>=1",
+    "twine>=6",
+    "pyright>=1.1.400",
 ]
 
 [tool.setuptools.packages.find]
 include = ["skcure*"]
 
+[tool.setuptools.package-data]
+skcure = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.pyright]
+include = ["skcure"]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+pythonVersion = "3.10"

@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 from scipy.special import expit, gammainc, gammaincc, gammaln
 from sklearn.base import BaseEstimator, clone
-from sklearn.exceptions import NotFittedError
+from sklearn.exceptions import ConvergenceWarning, NotFittedError
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.validation import check_is_fitted
@@ -54,14 +54,17 @@ def fitted_models(survival_data):
     X, y = survival_data
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
-        return {
-            name: GradientBoostingCure(
-                latent_distribution=FIXTURE_FAMILIES[case["class_name"]],
-                **case["params"],
-                **LEGACY["fit_params"],
-            ).fit(X, y)
-            for name, case in LEGACY["cases"].items()
-        }
+        fitted = {}
+        for name, case in LEGACY["cases"].items():
+            with pytest.warns(
+                ConvergenceWarning, match="EM did not converge within 3 iterations"
+            ):
+                fitted[name] = GradientBoostingCure(
+                    latent_distribution=FIXTURE_FAMILIES[case["class_name"]],
+                    **case["params"],
+                    **LEGACY["fit_params"],
+                ).fit(X, y)
+        return fitted
 
 
 @pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
@@ -148,7 +151,8 @@ def test_frozen_latency_retains_original_boosting_updates(
     monkeypatch.setattr(model, "_gg_m_step", lambda *args, **kwargs: None)
     if model.latent_distribution == "negative_binomial":
         monkeypatch.setattr(model, "_phi_m_step", lambda *args, **kwargs: None)
-    model.fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 3 iterations"):
+        model.fit(X, y)
     expected = case["fixed_gg_steps"]
     # The safeguarded analytic line search replaces the historical numerical
     # derivative. Retain the independent fixture as a close reference, with
@@ -245,7 +249,8 @@ def test_e_step_and_observed_likelihood_match_formulas(
     monkeypatch.setattr(model, "_gg_m_step", lambda *args, **kwargs: None)
     if model.latent_distribution == "negative_binomial":
         monkeypatch.setattr(model, "_phi_m_step", lambda *args, **kwargs: None)
-    model.fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model.fit(X, y)
     eta = np.linspace(-2, 2, len(X))
     model.eta_train_ = eta
     t, delta = y["time"], y["event"].astype(float)
@@ -454,11 +459,13 @@ def test_refit_is_reproducible_and_resets_ensemble(distribution, survival_data):
         latent_distribution=distribution,
         n_estimators=2, max_em_iter=1, min_samples_leaf=3, random_state=73
     )
-    model.fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model.fit(X, y)
     old_predictions = model.predict(X).copy()
     old_a, old_d, old_p = model.a_, model.d_, model.p_
     old_models = list(model.models_)
-    model.fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model.fit(X, y)
     np.testing.assert_array_equal(model.predict(X), old_predictions)
     assert (model.a_, model.d_, model.p_) == (old_a, old_d, old_p)
     assert len(model.models_) == len(old_models)
@@ -473,10 +480,12 @@ def test_pipeline_and_dataframe_features(distribution, survival_data):
         latent_distribution=distribution,
         n_estimators=1, max_em_iter=1, min_samples_leaf=3, random_state=73
     )
-    pipeline = make_pipeline(StandardScaler(), model).fit(frame, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        pipeline = make_pipeline(StandardScaler(), model).fit(frame, y)
     assert np.isfinite(pipeline.predict(frame)).all()
     assert np.isfinite(pipeline.score(frame, y))
-    copied = clone(model).fit(frame, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        copied = clone(model).fit(frame, y)
     np.testing.assert_array_equal(copied.feature_names_in_, frame.columns)
     with pytest.raises(ValueError, match="feature"):
         copied.predict(frame[["second", "first"]])
@@ -563,10 +572,11 @@ def test_failed_optimizer_invalidates_previous_fit(
     distribution, monkeypatch, survival_data
 ):
     X, y = survival_data
-    model = GradientBoostingCure(
-        latent_distribution=distribution,
-        n_estimators=1, max_em_iter=1, min_samples_leaf=3, random_state=73
-    ).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GradientBoostingCure(
+            latent_distribution=distribution,
+            n_estimators=1, max_em_iter=1, min_samples_leaf=3, random_state=73
+        ).fit(X, y)
 
     def fail(*args, **kwargs):
         raise RuntimeError("controlled optimizer failure")
@@ -716,13 +726,14 @@ def test_dispersion_fallback_rejects_invalid_objective(
 @pytest.mark.parametrize("distribution", LATENT_DISTRIBUTIONS)
 def test_maximum_integer_seed_supports_multiple_trees(distribution, survival_data):
     X, y = survival_data
-    model = GradientBoostingCure(
-        latent_distribution=distribution,
-        n_estimators=2,
-        max_em_iter=1,
-        min_samples_leaf=3,
-        random_state=2**32 - 1,
-    ).fit(X, y)
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 1 iterations"):
+        model = GradientBoostingCure(
+            latent_distribution=distribution,
+            n_estimators=2,
+            max_em_iter=1,
+            min_samples_leaf=3,
+            random_state=2**32 - 1,
+        ).fit(X, y)
     assert len(model.models_) == 2
     assert [tree.random_state for tree in model.models_] == [2**32 - 1, 0]
     assert np.isfinite(model.predict(X)).all()

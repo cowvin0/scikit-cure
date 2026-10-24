@@ -5,6 +5,7 @@ import inspect
 import numpy as np
 import pytest
 from sklearn.base import clone
+from sklearn.exceptions import ConvergenceWarning
 from sksurv.util import Surv
 
 from skcure.ensemble import GradientBoostingCure
@@ -45,7 +46,8 @@ def test_numpy_integer_iteration_limit_is_preserved_and_obeyed(
     model = estimator(**parameters)
     original_parameters = model.get_params()
 
-    assert model.fit(*survival_data) is model
+    with pytest.warns(ConvergenceWarning, match="EM did not converge within 2 iterations"):
+        assert model.fit(*survival_data) is model
     assert model.n_iter_ == max_em_iter
     assert model.max_em_iter is max_em_iter
     assert model.get_params() == original_parameters
