@@ -644,10 +644,12 @@ class GGKM(BaseCureEstimator):
         if not reuse:
             self._reset_parameters_for_fit()
 
-        self.X_train_ = X.copy()
+        # Reuse the owned row-major data for training kernels. Layout-dependent
+        # rounding can otherwise change the path of the incidence optimizer.
+        self.X_train_ = X.copy(order="C")
         self.K_ = self._compute_kernel(
-            X,
-            X,
+            self.X_train_,
+            self.X_train_,
         )
 
         if not np.allclose(

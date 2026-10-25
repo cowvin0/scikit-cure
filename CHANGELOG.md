@@ -2,6 +2,8 @@
 
 ## 0.1.0a1 — unreleased alpha
 
+- Use a consistent training memory layout in GGKM so kernel rounding from
+  NumPy versus DataFrame inputs does not alter the optimizer's fitted result.
 - Consolidate exponential helpers and handle expected tail overflow/underflow
   consistently, preserving NaNs, infinities, and representable tiny values.
 - Support eager Polars and Narwhals DataFrame feature inputs across estimators,

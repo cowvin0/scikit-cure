@@ -113,6 +113,39 @@ def test_wrapped_frames_can_be_fitted(fitted_pair, data, wrap):
                                rtol=1e-9, atol=1e-11)
 
 
+def test_ggkm_fit_is_independent_of_feature_memory_layout():
+    # With three features, C/F distance reductions differ by a few ulps on
+    # common BLAS backends. An early EM fit can amplify that difference.
+    rng = np.random.default_rng(73)
+    X = rng.normal(size=(24, 3))
+    y = Surv.from_arrays(
+        np.tile([True, False, True, True], 6),
+        np.round(rng.uniform(0.4, 3.2, size=len(X)), 3),
+    )
+    reference = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1)
+    with _fit_warning(reference):
+        reference.fit(X, y)
+    expected_risk = reference.predict(X)
+    expected_survival = reference.predict_survival(X, [0.0, 1.0, 3.0])
+
+    fortran = np.asfortranarray(X)
+    strided = np.repeat(X, 2, axis=1)[:, ::2]
+    assert fortran.flags.f_contiguous and not fortran.flags.c_contiguous
+    assert not strided.flags.c_contiguous and not strided.flags.f_contiguous
+    frame = pl.DataFrame(X, schema=["age", "marker", "treatment"])
+    for features in (fortran, strided, frame):
+        model = GGKM(gamma=0.3, lambda_reg=0.1, max_em_iter=1)
+        with _fit_warning(model):
+            model.fit(features, y)
+        np.testing.assert_array_equal(model.K_, reference.K_)
+        np.testing.assert_allclose(model.predict(features), expected_risk,
+                                   rtol=1e-9, atol=1e-11)
+        np.testing.assert_allclose(
+            model.predict_survival(features, [0.0, 1.0, 3.0]), expected_survival,
+            rtol=1e-9, atol=1e-11,
+        )
+
+
 def test_feature_names_are_checked_across_backends(fitted_pair, data):
     _, model = fitted_pair
     X, frame, y = data
