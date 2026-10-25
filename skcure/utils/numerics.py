@@ -51,7 +51,5 @@ def _maximum_log_float() -> float:
 
 def _safe_exp(log_x):
     """Exponentiate values while handling floating-point overflow/underflow."""
-    # NumPy correctly rounds values between half the smallest subnormal and
-    # that subnormal. Cutting off at log(min_subnormal) would erase them.
     with np.errstate(under="ignore"):
         return _exp_log_quantity(log_x)

@@ -33,8 +33,6 @@ def _large_shape_derivative(x: float, shape: float) -> float:
     root_shape = sqrt(shape)
     boundary = (x - shape) / root_shape
     if abs(boundary) >= 50.0:
-        # Beyond this interval the derivative is below the float64 range for
-        # shape >= 1e5, including the small skewness correction of the gamma.
         return 0.0
     inverse = 1.0 / shape
     center_log_density = -0.5 * np.log(2.0 * pi) - inverse / 12.0
@@ -47,11 +45,19 @@ def _large_shape_derivative(x: float, shape: float) -> float:
         relative = z / root_shape
         log_relative = log1p(relative)
         if abs(relative) < 0.001:
-            log_remainder = relative * relative * (
-                -0.5 + relative * (
-                    1.0 / 3.0 + relative * (
-                        -0.25 + relative * (
-                            0.2 + relative * (-1.0 / 6.0 + relative / 7.0)
+            log_remainder = (
+                relative
+                * relative
+                * (
+                    -0.5
+                    + relative
+                    * (
+                        1.0 / 3.0
+                        + relative
+                        * (
+                            -0.25
+                            + relative
+                            * (0.2 + relative * (-1.0 / 6.0 + relative / 7.0))
                         )
                     )
                 )
@@ -66,16 +72,11 @@ def _large_shape_derivative(x: float, shape: float) -> float:
 
     def integrand(z):
         log_density, scaled_score = log_density_and_score(z)
-        # Normalize by the density at the integration boundary. Without this,
-        # an absolute quadrature tolerance can accept a poorly resolved but
-        # representable derivative in a tail such as z=20 or z=38.
         return exp(log_density - log_scale) * scaled_score
 
     if boundary <= 0.0:
         integral = quad(integrand, -50.0, boundary, epsabs=1e-13, epsrel=5e-12)[0]
     else:
-        # The complete shape-score integral is zero. Integrating the shorter
-        # upper tail avoids cancellation when the CDF is close to one.
         integral = -quad(integrand, boundary, 50.0, epsabs=1e-13, epsrel=5e-12)[0]
     if integral == 0.0:
         return 0.0

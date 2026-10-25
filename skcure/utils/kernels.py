@@ -47,14 +47,10 @@ def wavelet_kernel(X, Y=None, *, A=10.0):
             overflowing_difference = np.isinf(diff)
             diff /= A
             if np.any(overflowing_difference):
-                # Opposite finite endpoints can overflow before division even
-                # when their scaled difference is small and representable.
                 scaled_difference = np.subtract.outer(X[:, j] / A, Y[:, j] / A)
                 diff[overflowing_difference] = scaled_difference[overflowing_difference]
             component = np.exp(-0.5 * diff * diff)
             nonzero = component > 0.0
-            # A vanishing Gaussian already makes this coordinate's factor
-            # zero. Avoid evaluating cos(inf), which would turn it into NaN.
             component[nonzero] *= np.cos(1.75 * diff[nonzero])
             K *= component
     return K

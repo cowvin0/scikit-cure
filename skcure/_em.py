@@ -324,8 +324,6 @@ class _LinearCureSteps(_GeneralizedGammaEMSteps):
         )
 
     def maximize_predictor(self, coefficients, expected):
-        # Optimize in coordinates with unit RMS design columns. Predictions
-        # and published coefficients continue to use the original feature units.
         matrix = self.model.W_train_
         magnitude = np.max(np.abs(matrix), axis=0)
         magnitude = np.where(magnitude > 0.0, magnitude, 1.0)
