@@ -13,6 +13,8 @@ from sksurv.base import SurvivalAnalysisMixin
 from sksurv.functions import StepFunction
 from sksurv.util import check_array_survival
 
+from skcure._dataframe import ensure_eager_dataframe
+
 
 class BaseCureEstimator(SurvivalAnalysisMixin, BaseEstimator, ABC):
     """Base class for estimators with a nonzero long-term survival probability.
@@ -52,6 +54,7 @@ class BaseCureEstimator(SurvivalAnalysisMixin, BaseEstimator, ABC):
         raise NotImplementedError("This estimator does not expose latent counts.")
 
     def _validate_fit_data(self, X, y) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        X = ensure_eager_dataframe(X)
         X = np.asarray(validate_data(self, X, dtype=np.float64, ensure_min_samples=2))
         event, time = check_array_survival(X, y, allow_time_zero=False)
         return X, event, time
@@ -125,6 +128,7 @@ class BaseCureEstimator(SurvivalAnalysisMixin, BaseEstimator, ABC):
 
     def _validate_predict_data(self, X) -> np.ndarray:
         check_is_fitted(self)
+        X = ensure_eager_dataframe(X)
         return np.asarray(validate_data(self, X, reset=False, dtype=np.float64))
 
     @staticmethod

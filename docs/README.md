@@ -4,6 +4,7 @@ scikit-cure extends the scikit-survival estimator API with models that allow a
 nonzero probability of never experiencing the event of interest.
 
 - [Installation and optional dependencies](installation.md)
+- [Polars, pandas, and Narwhals inputs](dataframes.md)
 - [Models, prediction methods, and assumptions](models.md)
 - [Fitting controls and diagnostics](fitting.md)
 - [Evaluation and simulation](evaluation.md)

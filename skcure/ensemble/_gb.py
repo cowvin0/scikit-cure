@@ -817,9 +817,8 @@ class GradientBoostingCure(BaseCureEstimator):
 
     def predict_survival(self, X, times):
         """Evaluate the continuous model at finite non-negative times."""
-        X = self._validate_predict_data(X)
-        times = self._validate_times(times)
         eta = self.predict_eta(X)
+        times = self._validate_times(times)
 
         return self._latent_model.predict_survival_from_eta(
             self._latency,
@@ -837,7 +836,6 @@ class GradientBoostingCure(BaseCureEstimator):
 
     def predict_cure_probability(self, X):
         """Return the limiting survival probability for each sample."""
-        X = self._validate_predict_data(X)
         eta = self.predict_eta(X)
 
         return self._latent_model.predict_cure_probability_from_eta(

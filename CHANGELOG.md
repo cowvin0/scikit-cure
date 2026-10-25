@@ -2,6 +2,9 @@
 
 ## 0.1.0a1 — unreleased alpha
 
+- Support eager Polars and Narwhals DataFrame feature inputs across estimators,
+  preserving feature-name checks and avoiding conversion through pandas. Share
+  input normalization with standalone kernels and future model implementations.
 - Extend scientific validation to genuine Poisson, negative-binomial, and
   binomial count-generating mechanisms, preserving existing simulation defaults.
 - Add survival-aware scikit-learn estimator checks and reproducible runtime

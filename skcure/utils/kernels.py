@@ -8,18 +8,24 @@ from scipy.spatial.distance import cdist
 from scipy.linalg import eigh
 from sklearn.metrics.pairwise import check_pairwise_arrays
 
+from skcure._dataframe import ensure_eager_dataframe
+
 __all__ = ["exponential_kernel", "cauchy_kernel", "wavelet_kernel"]
 
 
 def exponential_kernel(X, Y=None, *, gamma=1.0):
     """Return ``exp(-gamma * ||x - y||_2)`` for each pair of samples."""
-    X, Y = check_pairwise_arrays(X, Y, dtype="float64")
+    X, Y = check_pairwise_arrays(
+        ensure_eager_dataframe(X), ensure_eager_dataframe(Y), dtype="float64"
+    )
     return np.exp(-gamma * cdist(X, Y, metric="euclidean"))
 
 
 def cauchy_kernel(X, Y=None, *, gamma=1.0):
     """Return ``1 / (1 + gamma * ||x - y||_2**2)`` for each sample pair."""
-    X, Y = check_pairwise_arrays(X, Y, dtype="float64")
+    X, Y = check_pairwise_arrays(
+        ensure_eager_dataframe(X), ensure_eager_dataframe(Y), dtype="float64"
+    )
     return 1.0 / (1.0 + gamma * cdist(X, Y, metric="sqeuclidean"))
 
 
@@ -29,7 +35,9 @@ def wavelet_kernel(X, Y=None, *, A=10.0):
     Each feature contributes ``cos(1.75 * (x - y) / A)`` and the product
     is weighted by ``exp(-||x - y||_2**2 / (2 * A**2))``.
     """
-    X, Y = check_pairwise_arrays(X, Y, dtype="float64")
+    X, Y = check_pairwise_arrays(
+        ensure_eager_dataframe(X), ensure_eager_dataframe(Y), dtype="float64"
+    )
     if not isinstance(A, Real) or not isfinite(A) or A <= 0.0:
         raise ValueError("A must be positive and finite.")
     K = np.ones((len(X), len(Y)), dtype=float)

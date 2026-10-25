@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=2.0",
+    "narwhals>=2.0.1",
     "scipy>=1.13",
     "scikit-learn>=1.6",
     "scikit-survival>=0.25",
@@ -37,6 +38,7 @@ Documentation = "https://github.com/cowvin0/scikit-cure/tree/main/docs"
 Changelog = "https://github.com/cowvin0/scikit-cure/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
+polars = ["polars>=1.0"]
 deep-learning = [
     "tensorflow>=2.16",
     "numba",
@@ -45,6 +47,7 @@ deep-learning = [
 jax = ["jax>=0.4.30"]
 dev = [
     "pytest>=8",
+    "polars>=1.0",
     "build>=1",
     "twine>=6",
     "pyright>=1.1.400",

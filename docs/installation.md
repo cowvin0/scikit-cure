@@ -1,7 +1,7 @@
 # Installation
 
 Use Python 3.10 or later. Core requirements are NumPy 2.0+, SciPy 1.13+,
-scikit-learn 1.6+, and scikit-survival 0.25+. Dependency resolvers select
+scikit-learn 1.6+, scikit-survival 0.25+, and Narwhals 2.0.1+. Dependency resolvers select
 compatible versions for your Python interpreter; recent scikit-survival
 versions can require a newer Python. See [pyproject.toml](../pyproject.toml).
 
@@ -15,6 +15,19 @@ python -m pip install .
 
 TensorFlow, DeepCure, and JAX are optional. Importing `skcure` does not load
 them. GGKM, linear models, and boosting use NumPy/SciPy derivatives by default.
+
+## Polars inputs
+
+Narwhals is a core dependency; Polars is optional. To install Polars together
+with scikit-cure from the checkout:
+
+```bash
+python -m pip install '.[polars]'
+```
+
+An existing compatible Polars installation is sufficient. See
+[DataFrame inputs](dataframes.md) for fitting, preprocessing, and target
+construction. The development extra includes Polars for integration tests.
 
 ## Neural model
 

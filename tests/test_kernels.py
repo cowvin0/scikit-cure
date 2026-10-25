@@ -1,6 +1,10 @@
 """Kernel interoperability and legacy GGKM kernel regression tests."""
 
+import narwhals as nw
+import narwhals.stable.v2 as nw2
 import numpy as np
+import pandas as pd
+import polars as pl
 import pytest
 from scipy.spatial.distance import cdist
 from sklearn.base import clone
@@ -10,7 +14,7 @@ from sklearn.model_selection import GridSearchCV, KFold
 from sksurv.util import Surv
 
 from skcure.ggkm import GGKM
-from skcure.utils.kernels import wavelet_kernel
+from skcure.utils.kernels import cauchy_kernel, exponential_kernel, wavelet_kernel
 
 SKLEARN_KERNELS = [
     "linear",
@@ -31,6 +35,59 @@ def feature_matrices():
     X = np.array([[0.0, 1.0, 2.0], [1.5, 0.0, 0.5], [2.0, 3.0, 1.0]])
     Y = np.array([[0.5, 2.0, 1.5], [3.0, 1.0, 0.0]])
     return X, Y
+
+
+@pytest.mark.parametrize("kernel", [exponential_kernel, cauchy_kernel, wavelet_kernel])
+@pytest.mark.parametrize("backend", ["pandas", "polars"])
+@pytest.mark.parametrize(
+    "wrap", [lambda frame: frame, nw.from_native, nw2.from_native],
+    ids=["native", "narwhals", "stable-v2"],
+)
+def test_standalone_kernels_accept_dataframe_inputs(
+    kernel, backend, wrap, feature_matrices, monkeypatch
+):
+    X, Y = feature_matrices
+    columns = ["age", "marker", "treatment"]
+    if backend == "pandas":
+        frame_X = pd.DataFrame(X, columns=columns)
+        frame_Y = pd.DataFrame(Y, columns=columns)
+    else:
+        frame_X = pl.DataFrame(X, schema=columns, orient="row")
+        frame_Y = pl.DataFrame(Y, schema=columns, orient="row")
+
+    def unexpected_to_pandas(*args, **kwargs):
+        raise AssertionError("Kernel inputs must not pass through pandas")
+
+    monkeypatch.setattr(pl.DataFrame, "to_pandas", unexpected_to_pandas)
+    for other in (None, wrap(frame_Y)):
+        expected = kernel(X, None if other is None else Y)
+        actual = kernel(wrap(frame_X), other)
+        assert isinstance(actual, np.ndarray)
+        assert actual.shape == expected.shape
+        np.testing.assert_allclose(actual, expected, rtol=1e-13, atol=1e-14)
+
+
+@pytest.mark.parametrize("kernel", [exponential_kernel, cauchy_kernel, wavelet_kernel])
+@pytest.mark.parametrize("lazy_argument", ["X", "Y"])
+@pytest.mark.parametrize(
+    "wrap", [lambda frame: frame, nw.from_native, nw2.from_native],
+    ids=["native", "narwhals", "stable-v2"],
+)
+def test_standalone_kernels_reject_lazy_inputs_without_collection(
+    kernel, lazy_argument, wrap, feature_matrices, monkeypatch
+):
+    X, Y = feature_matrices
+    lazy = wrap(pl.DataFrame(X, orient="row").lazy())
+
+    def unexpected_collect(*args, **kwargs):
+        raise AssertionError("Kernels must not implicitly collect lazy inputs")
+
+    monkeypatch.setattr(pl.LazyFrame, "collect", unexpected_collect)
+    with pytest.raises(TypeError, match="collect"):
+        if lazy_argument == "X":
+            kernel(lazy, Y)
+        else:
+            kernel(X, lazy)
 
 
 def test_ggkm_does_not_inherit_kernel_implementation():

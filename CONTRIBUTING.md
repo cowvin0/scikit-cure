@@ -36,6 +36,26 @@ mathematical invariants and meaningful failure cases when changing fitting
 or numerical routines. Frozen model fixtures in `tests/data` guard numerical
 compatibility; changes to them need an explanation of the mathematical change.
 
+## Adding models and DataFrame support
+
+New cure estimators should inherit `BaseCureEstimator` and use
+`_validate_fit_data(X, y)` for fitting and `_validate_predict_data(X)` for
+prediction. These methods supply the shared DataFrame handling, feature-name
+checks, and numeric validation. Validate each prediction input once, then pass
+the validated array to internal calculations.
+
+Utilities and transformers that do not inherit the estimator base can use
+`ensure_eager_dataframe` from the private `skcure._dataframe` module before
+their usual scikit-learn validation. This helper unwraps Narwhals frames and
+rejects lazy inputs without collecting them. Preserve the native DataFrame
+until feature names have been checked; keep dtype, sparse support, and other
+numeric requirements at the validation call site. Avoid backend-specific
+branches in numerical code and imports from scikit-survival's private modules.
+
+Add new estimators to the shared fixture in `tests/test_dataframe_inputs.py`
+so they receive the same NumPy, pandas, Polars, and Narwhals compatibility
+checks. Extend those checks for any additional input contract.
+
 Update the user guide and `CHANGELOG.md` for public behavior changes. Before
 a release, set matching versions in `pyproject.toml`, `skcure/__init__.py`,
 and `CITATION.cff`, and run `python ci/check_version.py`.

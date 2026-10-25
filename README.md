@@ -31,7 +31,8 @@ limits the full fit (default 1000).
 
 ## Requirements
 
-Python 3.10 or later, NumPy 2.0+, SciPy 1.13+, scikit-learn, and scikit-survival.
+Python 3.10 or later, NumPy 2.0+, SciPy 1.13+, scikit-learn, scikit-survival,
+and Narwhals.
 Dependency versions are specified in [pyproject.toml](pyproject.toml).
 `DeepPromotionTimeCure` additionally requires TensorFlow and DeepCure, available
 through the [optional installation](docs/installation.md). JAX is optional.
@@ -56,6 +57,9 @@ As in scikit-survival, `y` is a structured array containing a boolean event
 indicator followed by the observed event or censoring time. `True` means the
 event was observed. Training times must be strictly positive, with at least
 one observed event.
+
+`X` accepts NumPy arrays, pandas and Polars DataFrames, and Narwhals DataFrames.
+For Polars installation and preprocessing, see [DataFrame inputs](docs/dataframes.md).
 
 ```python
 import numpy as np
