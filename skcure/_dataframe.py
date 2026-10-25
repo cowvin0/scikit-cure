@@ -20,9 +20,8 @@ def ensure_eager_dataframe(X: Any) -> Any:
     """
     if X is None or isinstance(X, np.ndarray):
         return X
-    # Unwrap any Narwhals namespace, including older main-namespace wrappers.
+
     native = nw.to_native(X, pass_through=True)
-    # Eager-frame detection only inspects type metadata; avoid another wrapper.
     if nw.dependencies.is_into_dataframe(native):
         return native
     frame = nw.from_native(native, pass_through=True)
