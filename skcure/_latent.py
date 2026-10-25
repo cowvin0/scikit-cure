@@ -9,7 +9,7 @@ from scipy.special import expit
 from scipy.optimize import minimize
 
 from skcure.distributions.base import latency_logcdf, latency_logsf
-from skcure.utils.numerics import _maximum_log_float, _exp_log_quantity, _exp_minus_exp
+from skcure.utils.numerics import _exp_minus_exp, _maximum_log_float, _safe_exp
 
 
 def _nb_population_terms(log_A, phi):
@@ -29,7 +29,7 @@ def _nb_population_terms(log_A, phi):
     log_scaled_component[small] = log_A[small] + np.log1p(correction)
     regular = ~small
     log_scaled_component[regular] = np.log(log_component[regular]) - np.log(phi)
-    scaled_component = _exp_log_quantity(log_scaled_component)
+    scaled_component = _safe_exp(log_scaled_component)
     return log_component, scaled_component
 
 
@@ -60,8 +60,8 @@ def _nb_phi_derivative(log_A, phi, delta):
     regular = ~small
     numerator = np.logaddexp(0.0, log_x[regular]) - expit(log_x[regular])
     log_first[regular] = np.log(numerator) - 2.0 * np.log(phi)
-    first = _exp_log_quantity(log_first)
-    second = _exp_log_quantity(_nb_log_scaled_mean(log_A, phi))
+    first = _safe_exp(log_first)
+    second = _safe_exp(_nb_log_scaled_mean(log_A, phi))
     return first - delta * second
 
 
@@ -268,7 +268,7 @@ class _PoissonLatentModel(_LatentCountModel):
         if np.any(np.isnan(log_latency_cdf)) or np.any(log_latency_cdf > 0.0):
             return -np.inf
 
-        theta_latency_cdf = _exp_log_quantity(eta + log_latency_cdf)
+        theta_latency_cdf = _safe_exp(eta + log_latency_cdf)
 
         if self._cumulative_intensity_is_invalid(theta_latency_cdf):
             return -np.inf
@@ -295,7 +295,7 @@ class _PoissonLatentModel(_LatentCountModel):
         log_latency_sf = latency_logsf(latency, t)
         if np.any(np.isnan(log_latency_sf)) or np.any(log_latency_sf > 0.0):
             raise FloatingPointError("Invalid Poisson latency survival probability.")
-        expected_remaining = _exp_log_quantity(eta + log_latency_sf)
+        expected_remaining = _safe_exp(eta + log_latency_sf)
 
         if np.any(~np.isfinite(expected_remaining)):
             raise FloatingPointError(self._e_step_overflow_error)
@@ -329,7 +329,7 @@ class _PoissonLatentModel(_LatentCountModel):
 
         log_theta_F = eta[:, None] + log_latency_cdf[None, :]
 
-        return -_exp_log_quantity(log_theta_F)
+        return -_safe_exp(log_theta_F)
 
     def predict_survival_from_eta(self, latency, eta, t_grid):
         with np.errstate(under="ignore"):
@@ -372,7 +372,7 @@ class _NegativeBinomialLatentModel(_LatentCountModel):
         large = log_x > 0.0
         centered_eta[large] = -np.log(self.phi) - np.logaddexp(0.0, -log_x[large])
         Q = np.sum(Nhat * centered_eta - scaled_component)
-        score = Nhat * expit(-log_x) - _exp_log_quantity(
+        score = Nhat * expit(-log_x) - _safe_exp(
             _nb_log_scaled_mean(eta, self.phi)
         )
 

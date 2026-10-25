@@ -2,6 +2,8 @@
 
 ## 0.1.0a1 — unreleased alpha
 
+- Consolidate exponential helpers and handle expected tail overflow/underflow
+  consistently, preserving NaNs, infinities, and representable tiny values.
 - Support eager Polars and Narwhals DataFrame feature inputs across estimators,
   preserving feature-name checks and avoiding conversion through pandas. Share
   input normalization with standalone kernels and future model implementations.
